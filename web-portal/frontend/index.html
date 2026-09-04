@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UPay 残高確認ポータル（デモ）</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
+    max-width: 480px;
+    margin: 80px auto;
+    padding: 0 24px;
+    text-align: center;
+    color: #202124;
+  }
+  h1 {
+    font-size: 24px;
+    margin-bottom: 8px;
+  }
+  p.description {
+    color: #5f6368;
+    margin-bottom: 32px;
+  }
+  #signInDiv {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 24px;
+  }
+  #status {
+    margin-top: 24px;
+    padding: 16px;
+    border-radius: 8px;
+    font-size: 16px;
+    display: none;
+  }
+  #status.info {
+    display: block;
+    background: #e8f0fe;
+    color: #1967d2;
+  }
+  #status.success {
+    display: block;
+    background: #e6f4ea;
+    color: #137333;
+    font-size: 28px;
+    font-weight: bold;
+  }
+  #status.error {
+    display: block;
+    background: #fce8e6;
+    color: #c5221f;
+  }
+</style>
+</head>
+<body>
+
+<h1>UPay 残高確認ポータル（デモ）</h1>
+<p class="description">
+  Googleアカウントでサインインすると、現在の残高を確認できます。<br>
+  ※本デモは残高表示のみです。購入・チャージはできません。
+</p>
+
+<div id="signInDiv"></div>
+<div id="status"></div>
+
+<script>
+  // ============================================================
+  // 設定値（TODO: ここに実際の値を入れてください）
+  // ============================================================
+
+  // Google Cloud Console で発行した OAuth 2.0 クライアントID。
+  // backend/Code.gs 内の CLIENT_ID と必ず同じ値にしてください。
+  // TODO: ここに実際の値を入れてください
+  const GOOGLE_CLIENT_ID = '605638314023-5rb9s3ukrkal634henma3trbnp17pfvq.apps.googleusercontent.com';
+
+  // GAS(Google Apps Script)をWebアプリとしてデプロイした際に発行される実行URL。
+  // 例: https://script.google.com/macros/s/xxxxxxxxxxxxxxxxxxxx/exec
+  // TODO: ここに実際の値を入れてください
+  const GAS_WEB_APP_URL = 'TODO_YOUR_GAS_WEB_APP_URL';
+
+  // ============================================================
+
+  function showStatus(message, type) {
+    const el = document.getElementById('status');
+    el.textContent = message;
+    el.className = type; // 'info' | 'success' | 'error'
+  }
+
+  // Googleサインイン成功時に呼ばれるコールバック
+  function handleCredentialResponse(response) {
+    // response.credential が Google発行のIDトークン(JWT)
+    const idToken = response.credential;
+    fetchBalance(idToken);
+  }
+
+  async function fetchBalance(idToken) {
+    showStatus('残高を確認しています…', 'info');
+
+    try {
+      const res = await fetch(GAS_WEB_APP_URL, {
+        method: 'POST',
+        // Content-Type を application/json にすると事前のCORSプリフライト(OPTIONS)が
+        // 必要になり、標準のGASデプロイでは失敗しやすいため text/plain で送信する。
+        // サーバー側(Code.gs)は本文をJSONとしてパースする。
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8',
+        },
+        body: JSON.stringify({ idToken: idToken }),
+      });
+
+      if (!res.ok) {
+        throw new Error('サーバーからエラー応答がありました (HTTP ' + res.status + ')');
+      }
+
+      const data = await res.json();
+
+      if (data.success) {
+        showStatus('現在の残高: ¥' + Number(data.balance).toLocaleString(), 'success');
+      } else {
+        showStatus('エラー: ' + (data.error || '不明なエラーが発生しました'), 'error');
+      }
+    } catch (err) {
+      showStatus('通信エラーが発生しました: ' + err.message, 'error');
+    }
+  }
+
+  window.onload = function () {
+    if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID.indexOf('TODO_') === 0) {
+      showStatus('GOOGLE_CLIENT_ID が未設定です。index.html 上部の設定値を確認してください。', 'error');
+      return;
+    }
+    if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL.indexOf('TODO_') === 0) {
+      showStatus('GAS_WEB_APP_URL が未設定です。index.html 上部の設定値を確認してください。', 'error');
+      return;
+    }
+
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: handleCredentialResponse,
+    });
+
+    google.accounts.id.renderButton(
+      document.getElementById('signInDiv'),
+      { theme: 'outline', size: 'large', text: 'signin_with', locale: 'ja' }
+    );
+  };
+</script>
+
+</body>
+</html>
