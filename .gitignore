@@ -44,5 +44,3 @@ app.*.map.json
 
 # 
 /assets/credentials.json
-.dart_tool
-.flutter-plugins-dependencies
