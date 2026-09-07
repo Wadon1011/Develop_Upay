@@ -38,6 +38,12 @@ var EMAIL_HEADER_CANDIDATES = ['email', 'emailaddress', 'mail', 'メールアド
 // ヘッダー行から「残高列」を探すときの候補（大文字小文字・前後空白は無視して比較する）
 var BALANCE_HEADER_CANDIDATES = ['balance', 'balanceamount', '残高', '残高額'];
 
+// ヘッダー行から「ユーザーID列」を探すときの候補（大文字小文字・前後空白は無視して比較する）
+var USERID_HEADER_CANDIDATES = ['userid', 'user id', 'user_id', 'ユーザーid', 'ユーザid'];
+
+// QRコードに載せるユーザーIDの桁数。数字のみのIDはこの桁数までゼロ埋めする。
+var USERID_DIGITS = 5;
+
 /**
  * GETリクエストを処理するエントリポイント。
  * 認証不要で販売中商品（SoldOut=false）の一覧を返す。
@@ -180,6 +186,7 @@ function lookupBalanceByEmail_(email) {
   var headers = values[0];
   var emailColIdx = findColumnIndex_(headers, EMAIL_HEADER_CANDIDATES);
   var balanceColIdx = findColumnIndex_(headers, BALANCE_HEADER_CANDIDATES);
+  var userIdColIdx = findColumnIndex_(headers, USERID_HEADER_CANDIDATES);
 
   if (emailColIdx === -1) {
     return { success: false, error: 'メールアドレス列が見つかりません。ヘッダー行の列名を確認してください。' };
@@ -191,11 +198,32 @@ function lookupBalanceByEmail_(email) {
   for (var i = 1; i < values.length; i++) {
     var rowEmail = String(values[i][emailColIdx] || '').trim().toLowerCase();
     if (rowEmail === email) {
-      return { success: true, balance: values[i][balanceColIdx] };
+      var result = { success: true, balance: values[i][balanceColIdx] };
+      result.userIdColumnFound = (userIdColIdx !== -1);
+      if (userIdColIdx !== -1) {
+        // 列が見つかった場合は、値が空でも userId キー自体は返す（空文字）。
+        // フロント側で「列なし」と「値が空」を区別できるようにするため。
+        result.userId = formatUserId_(values[i][userIdColIdx]);
+      }
+      return result;
     }
   }
 
   return { success: false, error: '未登録ユーザーです' };
+}
+
+/**
+ * ユーザーID列の値を、QRコードに載せる文字列へ整形する。
+ * 数字のみの場合は USERID_DIGITS 桁までゼロ埋めする。
+ * それ以外はトリムした文字列をそのまま返す。空なら空文字を返す。
+ */
+function formatUserId_(rawValue) {
+  var value = String(rawValue == null ? '' : rawValue).trim();
+  if (!value) { return ''; }
+  if (/^\d+$/.test(value)) {
+    while (value.length < USERID_DIGITS) { value = '0' + value; }
+  }
+  return value;
 }
 
 /**

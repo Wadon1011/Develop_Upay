@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600&display=swap">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 /* ── Tokens ─────────────────────────────────────────────── */
 :root {
@@ -534,6 +535,67 @@ body {
 #balStatus.info    { display: block; background: var(--accent-pale); color: var(--accent-deep); }
 #balStatus.error   { display: block; background: #FEE2E2; color: #B91C1C; }
 
+/* ── QR CARD ─────────────────────────────────────────────── */
+.qr-card {
+  width: 100%;
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 24px 28px 22px;
+  text-align: center;
+  display: none;
+}
+.qr-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-sub);
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  font-family: 'Outfit', sans-serif;
+  margin: 0 0 4px;
+}
+.qr-id {
+  font-family: 'Outfit', sans-serif;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 16px;
+  color: var(--text);
+}
+.qr-box {
+  display: inline-flex;
+  padding: 12px;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+.qr-box img, .qr-box canvas { display: block; }
+.qr-note {
+  font-size: 12px;
+  color: var(--text-sub);
+  line-height: 1.6;
+  margin: 14px 0 0;
+}
+.qr-save-btn {
+  margin-top: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s;
+}
+.qr-save-btn:hover { background: var(--accent-deep); }
+.qr-save-btn svg { width: 15px; height: 15px; stroke: currentColor; }
+
 /* ── Shared ──────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .card, .card-img, .skeleton-line { animation: none; transition: none; }
@@ -613,6 +675,18 @@ body {
 
       <!-- ステータスメッセージ -->
       <div id="balStatus"></div>
+
+      <!-- ユーザーIDのQRコード（ログイン後、UserIDが取得できたときに表示） -->
+      <div class="qr-card" id="qrCard">
+        <p class="qr-label">あなたのユーザーID</p>
+        <p class="qr-id" id="qrId">—</p>
+        <div class="qr-box" id="qrBox"></div>
+        <p class="qr-note" id="qrNote">このQRコードをUPay端末のカメラで読み取れます</p>
+        <button class="qr-save-btn" id="qrSaveBtn" onclick="saveQr()">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          QRコードを保存
+        </button>
+      </div>
 
       <!-- サインインカード（未ログイン時） -->
       <div class="signin-card" id="signinCard">
@@ -793,13 +867,86 @@ function showBalStatus(msg, type) {
   el.className = type;
 }
 
-function showBalanceCard(balance, email) {
+function showBalanceCard(balance, email, data) {
   document.getElementById('balanceCard').style.display = 'block';
   document.getElementById('balanceNum').textContent = Number(balance).toLocaleString();
   document.getElementById('balanceEmail').textContent = email;
   document.getElementById('signinCard').style.display = 'none';
   document.getElementById('signoutBtn').style.display = 'flex';
   document.getElementById('balStatus').className = '';
+  renderQr(data);
+}
+
+// ── QRコード ─────────────────────────────────────────────────
+function renderQr(data) {
+  const card = document.getElementById('qrCard');
+  const box  = document.getElementById('qrBox');
+  const idEl = document.getElementById('qrId');
+  const note = document.getElementById('qrNote');
+  const btn  = document.getElementById('qrSaveBtn');
+
+  box.innerHTML = '';
+  card.style.display = 'block';
+
+  const userId = data ? data.userId : undefined;
+  const columnFound = !data || data.userIdColumnFound !== false; // 旧バックエンド互換: キーが無ければ true 扱い
+
+  if (!columnFound) {
+    idEl.textContent = '—';
+    box.style.display = 'none';
+    btn.style.display = 'none';
+    note.textContent = 'スプレッドシートに「UserID」列が見つかりません。UserData シートのヘッダー行を確認してください。';
+    return;
+  }
+
+  if (userId === undefined || userId === null || String(userId).trim() === '') {
+    idEl.textContent = '—';
+    box.style.display = 'none';
+    btn.style.display = 'none';
+    note.textContent = 'あなたの行の UserID が空です。GAS を最新版に再デプロイ済みか、該当行に UserID が入力されているか確認してください。';
+    return;
+  }
+
+  const value = String(userId).trim();
+  idEl.textContent = value;
+  box.style.display = 'inline-flex';
+  btn.style.display = 'inline-flex';
+  note.textContent = 'このQRコードをUPay端末のカメラで読み取れます';
+
+  if (typeof QRCode === 'undefined') {
+    box.style.display = 'none';
+    btn.style.display = 'none';
+    note.textContent = 'QRコードライブラリを読み込めませんでした。通信環境を確認してください。';
+  } else {
+    new QRCode(box, {
+      text: value,
+      width: 200,
+      height: 200,
+      colorDark: '#000000',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.M,
+    });
+  }
+  card.style.display = 'block';
+}
+
+function saveQr() {
+  const box = document.getElementById('qrBox');
+  const canvas = box.querySelector('canvas');
+  const img = box.querySelector('img');
+  const dataUrl = canvas ? canvas.toDataURL('image/png') : (img ? img.src : null);
+  if (!dataUrl) return;
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = 'upay-userid-' + document.getElementById('qrId').textContent + '.png';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function hideQr() {
+  document.getElementById('qrCard').style.display = 'none';
+  document.getElementById('qrBox').innerHTML = '';
 }
 
 function handleCredentialResponse(response) {
@@ -825,8 +972,9 @@ async function fetchBalance(idToken) {
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
+    console.log('[UPay] GASレスポンス:', data);
     if (data.success) {
-      showBalanceCard(data.balance, signedInEmail);
+      showBalanceCard(data.balance, signedInEmail, data);
     } else {
       showBalStatus('エラー: ' + (data.error || '不明なエラー'), 'error');
     }
@@ -841,6 +989,7 @@ function handleSignOut() {
     google.accounts.id.revoke(signedInEmail, () => {});
   }
   signedInEmail = null;
+  hideQr();
   document.getElementById('balanceCard').style.display = 'none';
   document.getElementById('signoutBtn').style.display = 'none';
   document.getElementById('signinCard').style.display = 'block';
