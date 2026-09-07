@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UPay Shop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600&display=swap">
+<style>
+  /* ── Tokens ─────────────────────────────────────────────── */
+  :root {
+    --bg:           #F4F7F9;
+    --surface:      #FFFFFF;
+    --surface-2:    #EDF0F3;
+    --text:         #1B2030;
+    --text-sub:     #6B7585;
+    --text-inv:     #FFFFFF;
+    --accent:       #0CBF8A;
+    --accent-deep:  #09A876;
+    --accent-pale:  #E6FAF4;
+    --warn:         #F59E0B;
+    --warn-pale:    #FEF3C7;
+    --danger:       #EF4444;
+    --border:       #E2E7EC;
+    --shadow:       0 1px 3px rgba(27,32,48,.08), 0 4px 12px rgba(27,32,48,.06);
+    --shadow-hover: 0 4px 8px rgba(27,32,48,.10), 0 12px 24px rgba(27,32,48,.10);
+    --radius:       12px;
+    --radius-sm:    8px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:           #0F1219;
+      --surface:      #1A1F2E;
+      --surface-2:    #242A3A;
+      --text:         #E6EBF2;
+      --text-sub:     #8891A6;
+      --accent-pale:  #0D2E22;
+      --warn-pale:    #2D1F06;
+      --border:       #2A3045;
+      --shadow:       0 1px 3px rgba(0,0,0,.3), 0 4px 12px rgba(0,0,0,.25);
+      --shadow-hover: 0 4px 8px rgba(0,0,0,.35), 0 12px 24px rgba(0,0,0,.3);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg:           #0F1219;
+    --surface:      #1A1F2E;
+    --surface-2:    #242A3A;
+    --text:         #E6EBF2;
+    --text-sub:     #8891A6;
+    --accent-pale:  #0D2E22;
+    --warn-pale:    #2D1F06;
+    --border:       #2A3045;
+    --shadow:       0 1px 3px rgba(0,0,0,.3), 0 4px 12px rgba(0,0,0,.25);
+    --shadow-hover: 0 4px 8px rgba(0,0,0,.35), 0 12px 24px rgba(0,0,0,.3);
+  }
+
+  /* ── Reset ───────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: 'Noto Sans JP', -apple-system, sans-serif;
+    font-size: 14px;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Header ──────────────────────────────────────────────── */
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+  }
+
+  .header-inner {
+    max-width: 1120px;
+    margin: 0 auto;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+  }
+
+  .logo-mark {
+    width: 32px;
+    height: 32px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    color: #fff;
+    letter-spacing: -.5px;
+    flex-shrink: 0;
+  }
+
+  .logo-text {
+    font-family: 'Outfit', sans-serif;
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--text);
+    letter-spacing: -.3px;
+  }
+
+  .logo-text span {
+    color: var(--accent);
+  }
+
+  .header-sub {
+    font-size: 12px;
+    color: var(--text-sub);
+    font-weight: 500;
+  }
+
+  /* ── Main ────────────────────────────────────────────────── */
+  .main {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+  }
+
+  /* ── Page title ──────────────────────────────────────────── */
+  .page-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -.5px;
+    margin: 0 0 4px;
+    color: var(--text);
+    text-wrap: balance;
+  }
+
+  .page-desc {
+    font-size: 13px;
+    color: var(--text-sub);
+    margin: 0 0 24px;
+  }
+
+  /* ── Category filters ────────────────────────────────────── */
+  .filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+
+  .filter-btn {
+    padding: 7px 16px;
+    border-radius: 999px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--text-sub);
+    font-family: 'Outfit', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all .15s ease;
+    white-space: nowrap;
+  }
+
+  .filter-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .filter-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  /* ── Item count ──────────────────────────────────────────── */
+  .item-count {
+    font-size: 12px;
+    color: var(--text-sub);
+    margin-bottom: 16px;
+    font-family: 'Outfit', sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .item-count strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  /* ── Grid ────────────────────────────────────────────────── */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+  }
+
+  @media (max-width: 480px) {
+    .grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .main { padding: 20px 16px 48px; }
+    .header { padding: 0 16px; }
+    .page-title { font-size: 20px; }
+  }
+
+  /* ── Card ────────────────────────────────────────────────── */
+  .card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: box-shadow .2s ease, transform .2s ease;
+  }
+
+  .card:hover {
+    box-shadow: var(--shadow-hover);
+    transform: translateY(-2px);
+  }
+
+  .card-img-wrap {
+    aspect-ratio: 1;
+    overflow: hidden;
+    background: var(--surface-2);
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .card-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    padding: 12px;
+    transition: transform .3s ease;
+  }
+
+  .card:hover .card-img {
+    transform: scale(1.04);
+  }
+
+  .card-img-wrap[data-has-error="true"] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .img-placeholder {
+    font-size: 40px;
+    opacity: .35;
+  }
+
+  /* Category badge */
+  .cat-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .3px;
+    text-transform: uppercase;
+    backdrop-filter: blur(8px);
+  }
+
+  .cat-drink  { background: rgba(14,165,233,.15); color: #0EA5E9; }
+  .cat-snack  { background: rgba(168,85,247,.15);  color: #A855F7; }
+  .cat-food   { background: rgba(239,68,68,.15);   color: #EF4444; }
+  .cat-other  { background: rgba(107,114,128,.15); color: #6B7280; }
+
+  /* Stock badge */
+  .stock-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .stock-ok   { background: var(--accent-pale); color: var(--accent-deep); }
+  .stock-low  { background: var(--warn-pale);   color: #B45309; }
+  .stock-none { background: #FEE2E2;             color: var(--danger); }
+
+  /* Card body */
+  .card-body {
+    padding: 14px 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+  }
+
+  .card-name {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--text);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .card-footer {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: auto;
+  }
+
+  .card-price {
+    font-family: 'Outfit', sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.5px;
+  }
+
+  .card-price span {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-sub);
+    margin-right: 1px;
+  }
+
+  .card-stock {
+    font-family: 'Outfit', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-sub);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .card-stock.low  { color: var(--warn); }
+  .card-stock.none { color: var(--danger); font-weight: 600; }
+
+  /* ── States ──────────────────────────────────────────────── */
+  .state {
+    text-align: center;
+    padding: 64px 24px;
+    color: var(--text-sub);
+    display: none;
+  }
+
+  .state.visible { display: block; }
+
+  .state-icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+    display: block;
+  }
+
+  .state-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0 0 6px;
+  }
+
+  .state-body {
+    font-size: 13px;
+    color: var(--text-sub);
+    margin: 0;
+    max-width: 320px;
+    margin-inline: auto;
+  }
+
+  /* Loading skeleton */
+  .skeleton-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+  }
+
+  @media (max-width: 480px) {
+    .skeleton-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  }
+
+  .skeleton-card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .skeleton-img {
+    aspect-ratio: 1;
+    background: var(--surface-2);
+  }
+
+  .skeleton-body {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .skeleton-line {
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 50%, var(--surface-2) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+
+  .skeleton-line.name  { height: 14px; width: 80%; }
+  .skeleton-line.name2 { height: 14px; width: 55%; }
+  .skeleton-line.price { height: 20px; width: 45%; margin-top: 4px; }
+
+  @keyframes shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .shimmer, .skeleton-line { animation: none; }
+    .card { transition: none; }
+    .card-img { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <a class="logo" href="index.html">
+      <div class="logo-mark">U</div>
+      <div class="logo-text">U<span>Pay</span></div>
+    </a>
+    <span class="header-sub">商品一覧</span>
+  </div>
+</header>
+
+<main class="main">
+  <h1 class="page-title">販売中の商品</h1>
+  <p class="page-desc">現在購入できる商品です。アプリから購入・残高確認ができます。</p>
+
+  <div class="filters" id="filters">
+    <button class="filter-btn active" data-cat="all">すべて</button>
+    <button class="filter-btn" data-cat="drink">ドリンク</button>
+    <button class="filter-btn" data-cat="snack">スナック</button>
+    <button class="filter-btn" data-cat="food">フード</button>
+    <button class="filter-btn" data-cat="other">その他</button>
+  </div>
+
+  <div class="item-count" id="itemCount" hidden></div>
+
+  <!-- Loading -->
+  <div id="loadingState">
+    <div class="skeleton-grid">
+      <div class="skeleton-card" aria-hidden="true">
+        <div class="skeleton-img"></div>
+        <div class="skeleton-body">
+          <div class="skeleton-line name"></div>
+          <div class="skeleton-line name2"></div>
+          <div class="skeleton-line price"></div>
+        </div>
+      </div>
+      <div class="skeleton-card" aria-hidden="true">
+        <div class="skeleton-img"></div>
+        <div class="skeleton-body">
+          <div class="skeleton-line name"></div>
+          <div class="skeleton-line name2"></div>
+          <div class="skeleton-line price"></div>
+        </div>
+      </div>
+      <div class="skeleton-card" aria-hidden="true">
+        <div class="skeleton-img"></div>
+        <div class="skeleton-body">
+          <div class="skeleton-line name"></div>
+          <div class="skeleton-line name2"></div>
+          <div class="skeleton-line price"></div>
+        </div>
+      </div>
+      <div class="skeleton-card" aria-hidden="true">
+        <div class="skeleton-img"></div>
+        <div class="skeleton-body">
+          <div class="skeleton-line name"></div>
+          <div class="skeleton-line name2"></div>
+          <div class="skeleton-line price"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Grid -->
+  <div class="grid" id="grid" hidden></div>
+
+  <!-- Empty -->
+  <div class="state" id="emptyState">
+    <span class="state-icon">📭</span>
+    <p class="state-title">該当する商品がありません</p>
+    <p class="state-body">カテゴリを変えてみてください。</p>
+  </div>
+
+  <!-- Error -->
+  <div class="state" id="errorState">
+    <span class="state-icon">⚠️</span>
+    <p class="state-title">データを取得できませんでした</p>
+    <p class="state-body" id="errorMsg">しばらくしてからページを再読み込みしてください。</p>
+  </div>
+</main>
+
+<script>
+  // ── 設定 ────────────────────────────────────────────────────
+  const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycby39pD_EP5AmbE9DLAzLnfzlD2bFd4Rhu38RJAa9LFMPxagT9jtm7SHZ02DqN5AlYQPaQ/exec';
+
+  // カテゴリ表示名マップ
+  const CAT_LABEL = { drink: 'ドリンク', snack: 'スナック', food: 'フード', other: 'その他' };
+  const CAT_CLASS = { drink: 'cat-drink', snack: 'cat-snack', food: 'cat-food', other: 'cat-other' };
+  const CAT_EMOJI = { drink: '🥤', snack: '🍫', food: '🍜', other: '📦' };
+
+  // ── 状態 ────────────────────────────────────────────────────
+  let allItems = [];
+  let activeCategory = 'all';
+
+  // ── DOM ─────────────────────────────────────────────────────
+  const grid          = document.getElementById('grid');
+  const loadingState  = document.getElementById('loadingState');
+  const emptyState    = document.getElementById('emptyState');
+  const errorState    = document.getElementById('errorState');
+  const errorMsg      = document.getElementById('errorMsg');
+  const itemCount     = document.getElementById('itemCount');
+  const filters       = document.getElementById('filters');
+
+  // ── カテゴリフィルター ────────────────────────────────────────
+  filters.addEventListener('click', (e) => {
+    const btn = e.target.closest('.filter-btn');
+    if (!btn) return;
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeCategory = btn.dataset.cat;
+    renderGrid();
+  });
+
+  // ── カード生成 ────────────────────────────────────────────────
+  function buildCard(item) {
+    const cat = (item.category || 'other').toLowerCase();
+    const stock = Number(item.stock);
+
+    let stockClass, stockLabel, badgeClass, badgeLabel;
+    if (stock <= 0) {
+      stockClass = 'none'; stockLabel = '在庫なし';
+      badgeClass = 'stock-none'; badgeLabel = '在庫切れ';
+    } else if (stock <= 5) {
+      stockClass = 'low'; stockLabel = `残り${stock}個`;
+      badgeClass = 'stock-low'; badgeLabel = '残り少ない';
+    } else {
+      stockClass = ''; stockLabel = `在庫 ${stock}`;
+      badgeClass = 'stock-ok'; badgeLabel = `在庫 ${stock}`;
+    }
+
+    const card = document.createElement('article');
+    card.className = 'card';
+
+    card.innerHTML = `
+      <div class="card-img-wrap">
+        <img
+          class="card-img"
+          src="${escHtml(item.image || '')}"
+          alt="${escHtml(item.name)}"
+          loading="lazy"
+          onerror="this.parentElement.setAttribute('data-has-error','true');this.style.display='none';this.parentElement.innerHTML+='<span class=\\'img-placeholder\\'>${CAT_EMOJI[cat] || '📦'}</span>'"
+        >
+        <span class="cat-badge ${CAT_CLASS[cat] || 'cat-other'}">${escHtml(CAT_LABEL[cat] || cat)}</span>
+        <span class="stock-badge ${badgeClass}">${badgeLabel}</span>
+      </div>
+      <div class="card-body">
+        <div class="card-name">${escHtml(item.name)}</div>
+        <div class="card-footer">
+          <div class="card-price"><span>¥</span>${Number(item.price).toLocaleString()}</div>
+          <div class="card-stock ${stockClass}">${stockLabel}</div>
+        </div>
+      </div>`;
+
+    return card;
+  }
+
+  function escHtml(str) {
+    return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── グリッド描画 ──────────────────────────────────────────────
+  function renderGrid() {
+    const filtered = activeCategory === 'all'
+      ? allItems
+      : allItems.filter(it => (it.category || '').toLowerCase() === activeCategory);
+
+    grid.innerHTML = '';
+
+    if (filtered.length === 0) {
+      grid.hidden = true;
+      emptyState.classList.add('visible');
+      itemCount.hidden = true;
+    } else {
+      emptyState.classList.remove('visible');
+      grid.hidden = false;
+      filtered.forEach(item => grid.appendChild(buildCard(item)));
+      itemCount.textContent = '';
+      itemCount.hidden = false;
+      const strong = document.createElement('strong');
+      strong.textContent = filtered.length;
+      itemCount.appendChild(strong);
+      itemCount.appendChild(document.createTextNode(' 件の商品'));
+    }
+  }
+
+  // ── データ取得 ────────────────────────────────────────────────
+  async function fetchItems() {
+    try {
+      const res = await fetch(GAS_WEB_APP_URL);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || '不明なエラー');
+      return data.items;
+    } catch (err) {
+      throw err;
+    }
+  }
+
+  // ── 初期化 ────────────────────────────────────────────────────
+  (async () => {
+    loadingState.style.display = '';
+    grid.hidden = true;
+    emptyState.classList.remove('visible');
+    errorState.classList.remove('visible');
+
+    try {
+      allItems = await fetchItems();
+      loadingState.style.display = 'none';
+      renderGrid();
+    } catch (err) {
+      loadingState.style.display = 'none';
+      errorMsg.textContent = err.message || 'データの取得中にエラーが発生しました。';
+      errorState.classList.add('visible');
+    }
+  })();
+</script>
+
+</body>
+</html>
