@@ -1,0 +1,78 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write GAS connection settings
+        env:
+          UPAY_GAS_URL: ${{ vars.UPAY_GAS_URL }}
+          UPAY_REGISTER_API_KEY: ${{ secrets.UPAY_REGISTER_API_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import urlparse
+
+          url = os.environ.get('UPAY_GAS_URL', '')
+          key = os.environ.get('UPAY_REGISTER_API_KEY', '')
+          parsed = urlparse(url)
+          if parsed.scheme != 'https' or parsed.hostname != 'script.google.com' or not parsed.path.endswith('/exec'):
+              raise SystemExit('Set the UPAY_GAS_URL repository variable to the GAS /exec URL.')
+          if len(key) < 32:
+              raise SystemExit('Set the UPAY_REGISTER_API_KEY repository secret (32+ characters).')
+          path = Path('config/register.local.json')
+          path.parent.mkdir(parents=True, exist_ok=True)
+          path.write_text(json.dumps({'UPAY_GAS_URL': url, 'UPAY_REGISTER_API_KEY': key}), encoding='utf-8')
+          path.chmod(0o600)
+          PY
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.2'
+
+      - name: Resolve dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Test GAS and Flutter
+        run: |
+          node --test web-portal/backend/Code.test.cjs
+          flutter test --no-pub
+
+      - name: Build unsigned iOS app
+        run: flutter build ios --release --no-codesign --dart-define-from-file=config/register.local.json
+
+      - name: Package unsigned IPA
+        run: |
+          test -d build/ios/iphoneos/Runner.app
+          mkdir -p build/ios/unsigned/Payload
+          ditto build/ios/iphoneos/Runner.app build/ios/unsigned/Payload/Runner.app
+          cd build/ios/unsigned
+          zip -qry UPay-unsigned.ipa Payload
+          unzip -tq UPay-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: UPay-unsigned
+          path: build/ios/unsigned/UPay-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Remove connection settings
+        if: always()
+        run: rm -f config/register.local.json

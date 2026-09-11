@@ -1,11 +1,10 @@
+import 'package:upay_ver01/gas_api.dart';
 import 'package:flutter/material.dart';
 import 'package:upay_ver01/gift_page.dart';
 import 'package:upay_ver01/main.dart';
 import 'package:upay_ver01/select_page.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:gsheets/gsheets.dart';
-import 'package:upay_ver01/encryption_helper.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 class CameraPage extends StatefulWidget {
@@ -96,59 +95,45 @@ class _CameraPageState extends State<CameraPage>
     );
   }
 
-  void _loadScanData(BarcodeCapture scandata) {
-    HapticFeedback.mediumImpact();
-
-    int scanID = int.tryParse(scandata.barcodes.first.rawValue ?? '') ?? 0;
-
-    UserData loadUserData = UserData(
-        id: -1,
-        userName: 'error',
-        balance: -1,
-        purchaseNum: -1,
-        totalAmount: -1,
-        giftAmount: -1);
-
-    print('読み込んだidは${scanID}');
-    // UserData findData = wscanIDget.users.firstWhere((element) => element.scanID == scanID);
-
-    // コードのタイプを示すオブジェクト
-    BarcodeType? codeType = scandata?.barcodes.first.type;
-    print('codeTypeは${codeType}');
-    if (codeType == BarcodeType.text) {
-      // QRコード
-      print('QRコード');
-    } else if (codeType == BarcodeType.product) {
-      // バーコード
-      print('バーコード');
-      // 末尾はチェックデジットなので省く
-      scanID = scanID ~/ 10;
-      // 上7桁は関係ない
-      scanID = scanID % 100000;
-    }
-
-    print('修正したscanIDは${scanID}');
-    // firstWhereだと見つからなかったとき止まるので編集
-    for (int i = 0; i < widget.users.length; i++) {
-      if (widget.users[i].id == scanID) {
-        loadUserData = widget.users[i];
+  bool _verifying = false;
+  Future<void> _loadScanData(BarcodeCapture scanData) async {
+    if (_verifying || scanData.barcodes.isEmpty) return;
+    final token = scanData.barcodes.first.rawValue;
+    if (token == null) return;
+    _verifying = true;
+    try {
+      await controller.stop();
+      final result = await GasApi.instance.verifyQr(token.trim());
+      final user = UserData.fromApi(
+          Map<String, dynamic>.from(result['user'] as Map),
+          result['sessionToken'] as String);
+      if (!mounted) return;
+      HapticFeedback.mediumImpact();
+      _loadNextPage(user, widget.items);
+    } catch (error) {
+      if (!mounted) return;
+      await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+                title: const Text('QRコードを確認してください'),
+                content: Text(error.toString()),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('再読み取り'))
+                ],
+              ));
+      if (mounted) {
+        _verifying = false;
+        await controller.start();
       }
     }
+  }
 
-    // 正しいバーコードでなかったとき
-    // ダイアログが出て再度実行できるようにしたい
-    if (loadUserData.id == -1) {
-      showDialog<void>(
-          context: context,
-          builder: (_) {
-            return AlertDialogSample(
-              items: widget.items,
-              users: widget.users,
-            );
-          });
-    } else {
-      _loadNextPage(loadUserData, widget.items);
-    }
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
   }
 
 // 次のシーンの読み出しはこの関数が行う
@@ -326,13 +311,7 @@ class _CameraPageState extends State<CameraPage>
 
                       fit: BoxFit.cover,
                       // QRコードかバーコードが見つかった後すぐ実行する関数
-                      onDetect: (scandata) {
-                        setState(() {
-                          controller.stop();
-                          // 結果を表す画面に切り替える
-                          _loadScanData(scandata);
-                        });
-                      },
+                      onDetect: _loadScanData,
                     ),
                   ),
                 ),

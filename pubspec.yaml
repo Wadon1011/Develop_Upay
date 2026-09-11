@@ -21,7 +21,7 @@ dependencies:
   qr_code_scanner: ^1.0.1
   mobile_scanner: ^5.1.1
   riverpod: ^2.5.1
-  gsheets: ^0.5.0
+  http: ^1.2.1
   crypto: ^3.0.3
   pointycastle: ^3.9.1
   encrypt: ^5.0.3
@@ -42,7 +42,6 @@ flutter:
   # ↓この部分を追加する↓
   assets:
     - images/
-    - assets/credentials.json
     - assets/sounds/
 
   fonts:

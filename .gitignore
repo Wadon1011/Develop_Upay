@@ -44,3 +44,6 @@ app.*.map.json
 
 # 
 /assets/credentials.json
+
+# Local register endpoint and API key
+/config/*.local.json

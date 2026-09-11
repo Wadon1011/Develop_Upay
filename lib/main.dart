@@ -1,3 +1,4 @@
+import 'package:upay_ver01/gas_api.dart';
 import 'package:english_words/english_words.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
@@ -5,8 +6,6 @@ import 'package:provider/provider.dart';
 import 'package:upay_ver01/camera_page.dart';
 import 'package:upay_ver01/theme.dart';
 import 'package:flutter/services.dart';
-import 'package:gsheets/gsheets.dart';
-import 'dart:convert';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,51 +27,23 @@ extension ContextColorScheme on BuildContext {
 }
 
 Future<void> loadItemData(List<ItemData> items, List<UserData> users) async {
-  // スプレッドシートの値を読み取る
-  // サービスアカウントの認証情報をロード
-  final credentials = await rootBundle.loadString('assets/credentials.json');
-  final jsonCredentials = jsonDecode(credentials);
-  final gsheets = GSheets(jsonCredentials);
-
-  // スプレッドシートIDを指定
-  final spreadsheetId = '1c8civD4TDvMohN-gQyOrnODUF-On2ZV8HseyWADFfKw';
-
-  // スプレッドシートを取得
-  final ss = await gsheets.spreadsheet(spreadsheetId);
-
-  // シート名を指定してワークシートを取得
-  final itemDataSheet = ss.worksheetByTitle('ItemData');
-
-  // セルの値を読み取る
-  final cellValue = await itemDataSheet?.values.value(column: 5, row: 2);
-  print('セルの値: $cellValue');
-
-  // セルに値を書き込む
-  // await sheet.values.insertValue('Hello, Flutter!', column: 0, row: 1);
-
-  // 列の値を読み取る
-  final columnValues = await itemDataSheet?.values.column(1);
-  print('列の値: $columnValues');
-
-  // 商品データをセットする
-  final products = await itemDataSheet?.values.map.allRows();
-
-  // List<Product> productList= products.map((json) => Product.fromGsheets(json)).toList();
-  if (products != null) {
-    items.addAll(products.map((json) => ItemData.fromGsheets(json)).toList());
-    items.removeWhere((element) => element.soldOut); // 売り切れは省く
-  } else {
-    print('Failed to fetch product data.');
-  }
-  // 次は全ユーザのデータをセットする
-  // シート名を指定してワークシートを取得
-  final userDataSheet = ss.worksheetByTitle('UserData');
-  final allUsers = await userDataSheet?.values.map.allRows();
-  if (allUsers != null) {
-    users.addAll(allUsers.map((json) => UserData.fromGsheets(json)).toList());
-  } else {
-    print('Failed to fetch product data.');
-  }
+  final products = await GasApi.instance.items();
+  final loaded = products
+      .map((item) => ItemData.fromGsheets({
+            'ItemID': item['id'].toString(),
+            'Name': item['name'].toString(),
+            'Price': item['price'].toString(),
+            'Stock': item['stock'].toString(),
+            'ImagePath': item['image'].toString(),
+            'Category': item['category'].toString(),
+            'SoldOut': 'false',
+            'SalesFigure': '0',
+          }))
+      .toList();
+  items
+    ..clear()
+    ..addAll(loaded);
+  users.clear(); // ユーザー一覧は端末へ配信しない。QR検証で本人の情報だけ取得する。
 }
 
 class MyApp extends StatelessWidget {
@@ -150,6 +121,7 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _isDialogShowing = false;
   // 変更: loadDataAndProcessを呼び出してからシーンを変更
   void _loadNext() async {
+    if (_isDialogShowing) return;
     HapticFeedback.mediumImpact();
 
     // ダイアログが既に表示されている場合は表示しない
@@ -162,6 +134,11 @@ class _MyHomePageState extends State<MyHomePage> {
     try {
       // データをロードし、処理が完了するまで待つ
       await loadItemData(items, users);
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.toString())));
+      return;
     } finally {
       // ダイアログを閉じる
       if (_isDialogShowing) {
@@ -388,6 +365,7 @@ class UserData {
     required this.purchaseNum,
     required this.totalAmount,
     required this.giftAmount,
+    this.sessionToken = '',
   });
 
   final int id;
@@ -396,15 +374,36 @@ class UserData {
   int purchaseNum;
   int totalAmount;
   int giftAmount;
+  final String sessionToken;
 
   UserData copyWith({int? id, String? userName, int? balance}) => UserData(
         id: id ?? this.id,
         userName: userName ?? this.userName,
         balance: balance ?? this.balance,
-        purchaseNum: purchaseNum ?? this.purchaseNum,
-        totalAmount: totalAmount ?? this.totalAmount,
-        giftAmount: giftAmount ?? this.giftAmount,
+        purchaseNum: purchaseNum,
+        totalAmount: totalAmount,
+        giftAmount: giftAmount,
+        sessionToken: sessionToken,
       );
+
+  factory UserData.fromApi(Map<String, dynamic> json, String sessionToken) =>
+      UserData(
+        id: int.parse(json['UserID'].toString()),
+        userName: json['UserName'].toString(),
+        balance: int.parse(json['Balance'].toString()),
+        purchaseNum: int.parse(json['PurchaseNum'].toString()),
+        totalAmount: int.parse(json['TotalAmount'].toString()),
+        giftAmount: int.parse(json['GiftAmount'].toString()),
+        sessionToken: sessionToken,
+      );
+
+  void applyApi(Map<String, dynamic> json) {
+    final fresh = UserData.fromApi(json, sessionToken);
+    balance = fresh.balance;
+    purchaseNum = fresh.purchaseNum;
+    totalAmount = fresh.totalAmount;
+    giftAmount = fresh.giftAmount;
+  }
 
   factory UserData.fromGsheets(Map<String, dynamic> json) {
     return UserData(

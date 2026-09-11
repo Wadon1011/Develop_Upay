@@ -1,14 +1,10 @@
-import 'dart:math';
-import 'package:upay_ver01/camera_page.dart';
+import 'package:upay_ver01/gas_api.dart';
 import 'package:flutter/material.dart';
 import 'package:upay_ver01/main.dart';
 import 'package:upay_ver01/select_page.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
-import 'package:gsheets/gsheets.dart';
-import 'dart:convert';
-import 'package:flutter/scheduler.dart' show timeDilation;
 import 'package:flutter/animation.dart';
 import 'package:audioplayers/audioplayers.dart';
 
@@ -331,8 +327,8 @@ class _PaymentPageState extends State<PaymentPage>
 
   bool _isDialogShowing = false;
   void _loadTopPage() async {
+    if (_isDialogShowing) return;
     UserData newData = widget.userData.copyWith();
-    newData.balance = _getNewBalance();
 
     // ダイアログが既に表示されている場合は表示しない
     if (!_isDialogShowing) {
@@ -345,14 +341,22 @@ class _PaymentPageState extends State<PaymentPage>
     try {
       // データをロードし、処理が完了するまで待つ
       await purchase(newData, [...widget.items]);
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(error.toString()),
+            duration: const Duration(seconds: 8)));
+      return;
     } finally {
       // ダイアログを閉じる
       if (_isDialogShowing) {
         Navigator.of(context, rootNavigator: true).pop();
-        await showCheckmarkOverlay(context);
         _isDialogShowing = false;
       }
     }
+
+    if (!mounted) return;
+    await showCheckmarkOverlay(context);
 
     // ホワイトアウトを使って新しい画面に遷移
     await navigateWithWhiteOut(context, MyApp());
@@ -805,99 +809,15 @@ PageRouteBuilder<Object?> colorOut(Widget screen, Color color) {
   );
 }
 
-Future<void> purchase(UserData newUserData, List<ItemData> itemDatas) async {
-  // スプレッドシートの値を読み取る
-  // サービスアカウントの認証情報をロード
-  final credentials = await rootBundle.loadString('assets/credentials.json');
-  final jsonCredentials = jsonDecode(credentials);
-  final gsheets = GSheets(jsonCredentials);
-
-  // スプレッドシートIDを指定
-  final spreadsheetId = '1c8civD4TDvMohN-gQyOrnODUF-On2ZV8HseyWADFfKw';
-
-  // スプレッドシートを取得
-  final ss = await gsheets.spreadsheet(spreadsheetId);
-
-  // シート名を指定してワークシートを取得
-  final userDataSheet = ss.worksheetByTitle('UserData');
-
-  // この決済でいくら使っているかを記録
-  int amountSpent = 0;
-
-  // ユーザの情報を更新する
-  for (int i = 0; i < itemDatas.length; i++) {
-    if (itemDatas[i].tapCount > 0) {
-      newUserData.purchaseNum += itemDatas[i].tapCount;
-      newUserData.totalAmount += itemDatas[i].price * itemDatas[i].tapCount;
-      amountSpent += itemDatas[i].price * itemDatas[i].tapCount;
-    }
-  }
-  await userDataSheet?.values.map
-      .insertRowByKey(newUserData.id, newUserData.toGsheets());
-
-  // 購入履歴を書きこむ
-
-  // PurchaseHistoryは月ごとにシートを新しく作る
-  final DateTime now = DateTime.now();
-  final String monthSheetName = 'PurchaseHistory' +
-      DateFormat('yyyyMM').format(now).substring(2); // 202407 → 2407
-
-  var purchaseHistorySheet = ss.worksheetByTitle(monthSheetName);
-
-  // シートが存在しない場合、新しいシートを作成
-  if (purchaseHistorySheet == null) {
-    purchaseHistorySheet = await ss.addWorksheet(monthSheetName);
-    // ヘッダー行を追加
-    await purchaseHistorySheet.values.insertRow(1, [
-      'DateTime',
-      'UserID',
-      'ItemID',
-      'ItemName',
-      'Number',
-      'AfterPurchase',
-      'AmountSpent',
-    ]);
-  }
-
-  // 何個売れているか記録用
-  // 在庫がいくつあるかの記録も追加(2024/09/25)
-  final itemDataSheet = ss.worksheetByTitle('ItemData');
-
-  // 最後の行の位置を見つける
-  final allRows = await purchaseHistorySheet?.values.allRows();
-  List<int> itemIDs = [];
-  List<String> itemNames = [];
-  List<int> numbers = [];
-  for (int i = 0; i < itemDatas.length; i++) {
-    if (itemDatas[i].tapCount > 0) {
-      ItemData newItemData = itemDatas[i]; // これはコピーにするとtapCountがリセットされてしまう
-      itemIDs.add(newItemData.id);
-      itemNames.add(newItemData.name);
-      numbers.add(newItemData.tapCount);
-      if (newUserData.id != 0) {
-        // テストデータは購入個数に記録されないようにする
-        newItemData.salesFigure += newItemData.tapCount;
-        newItemData.stock -= newItemData.tapCount;
-        if (newItemData.stock <= 0) {
-          // 在庫が0個以下なのでSoldOut=trueにする
-          newItemData.soldOut = true;
-        }
-      }
-      itemDataSheet?.values.map
-          .insertRowByKey(newItemData.id, newItemData.toGsheets());
-    }
-  }
-  if (allRows != null && newUserData.id != 0) {
-    int lastRows = allRows.length + 1;
-    PurchaseHistory newHistory = PurchaseHistory(
-        time: DateTime.now().toString(),
-        userID: newUserData.id,
-        itemIDs: itemIDs,
-        itemNames: itemNames,
-        numbers: numbers,
-        afterPurchase: newUserData.balance,
-        amountSpent: amountSpent);
-    await purchaseHistorySheet?.values.map
-        .insertRow(lastRows, newHistory.toGsheets());
-  }
+Future<void> purchase(UserData user, List<ItemData> items) async {
+  final result = await GasApi.instance.transact('purchase', user.sessionToken, {
+    'items': items
+        .where((item) => item.tapCount > 0)
+        .map((item) => {
+              'itemId': item.id,
+              'quantity': item.tapCount,
+            })
+        .toList(),
+  });
+  user.applyApi(result);
 }

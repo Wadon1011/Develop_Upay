@@ -1,13 +1,8 @@
+import 'package:upay_ver01/gas_api.dart';
 import 'package:flutter/material.dart';
 import 'package:upay_ver01/main.dart';
 import 'package:upay_ver01/select_page.dart';
 import 'package:flutter/services.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:gsheets/gsheets.dart';
-import 'package:upay_ver01/encryption_helper.dart';
-import 'package:gsheets/gsheets.dart';
-import 'package:intl/intl.dart';
-import 'dart:convert';
 
 class GiftPage extends StatefulWidget {
   const GiftPage({
@@ -256,16 +251,15 @@ class BuyButton extends StatefulWidget {
 }
 
 class _BuyButtonState extends State<BuyButton> {
+  bool _isDialogShowing = false;
   bool isBuyButtonEnabled = true;
   bool _pressedBuy = false;
 
   void _loadSelectPage() async {
-    bool _isDialogShowing = false;
+    if (_isDialogShowing) return;
     // 商品選択ページへの遷移をここに追加
     print('Navigating to payment page...');
     UserData newUserData = widget.userData.copyWith();
-    newUserData.balance += widget.userData.giftAmount;
-    newUserData.giftAmount = 0;
 
     // ダイアログが既に表示されている場合は表示しない
     if (!_isDialogShowing) {
@@ -277,6 +271,12 @@ class _BuyButtonState extends State<BuyButton> {
     try {
       // データをロードし、処理が完了するまで待つ
       await charge(newUserData);
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(error.toString()),
+            duration: const Duration(seconds: 8)));
+      return;
     } finally {
       // ダイアログを閉じる
       if (_isDialogShowing) {
@@ -309,25 +309,9 @@ class _BuyButtonState extends State<BuyButton> {
     );
   }
 
-  Future<void> charge(UserData newUserData) async {
-    // スプレッドシートの値を読み取る
-    // サービスアカウントの認証情報をロード
-    final credentials = await rootBundle.loadString('assets/credentials.json');
-    final jsonCredentials = jsonDecode(credentials);
-    final gsheets = GSheets(jsonCredentials);
-
-    // スプレッドシートIDを指定
-    final spreadsheetId = '1c8civD4TDvMohN-gQyOrnODUF-On2ZV8HseyWADFfKw';
-
-    // スプレッドシートを取得
-    final ss = await gsheets.spreadsheet(spreadsheetId);
-
-    // シート名を指定してワークシートを取得
-    final userDataSheet = ss.worksheetByTitle('UserData');
-
-    // ユーザの情報を更新する
-    await userDataSheet?.values.map
-        .insertRowByKey(newUserData.id, newUserData.toGsheets());
+  Future<void> charge(UserData user) async {
+    user.applyApi(
+        await GasApi.instance.transact('claimGift', user.sessionToken, {}));
   }
 
   @override
@@ -346,7 +330,6 @@ class _BuyButtonState extends State<BuyButton> {
         });
       },
       onTapCancel: () {
-        _loadSelectPage();
         setState(() {
           _pressedBuy = false;
         });

@@ -1,12 +1,9 @@
-import 'package:english_words/english_words.dart';
+import 'package:upay_ver01/gas_api.dart';
 import 'package:flutter/material.dart';
 import 'package:upay_ver01/select_page.dart';
-import 'package:upay_ver01/camera_page.dart';
 import 'package:intl/intl.dart';
 import 'package:upay_ver01/main.dart';
 import 'package:flutter/services.dart';
-import 'package:gsheets/gsheets.dart';
-import 'dart:convert';
 
 class ChargePage extends StatefulWidget {
   const ChargePage({
@@ -558,8 +555,8 @@ class _AlertDialogSampleState extends State<AlertDialogSample> {
 
   bool _isDialogShowing = false;
   void _loadSelectPage() async {
+    if (_isDialogShowing) return;
     UserData newData = widget.userData.copyWith();
-    newData.balance += widget.chargeAmount;
 
     // ダイアログが既に表示されている場合は表示しない
     if (!_isDialogShowing) {
@@ -571,6 +568,12 @@ class _AlertDialogSampleState extends State<AlertDialogSample> {
     try {
       // データをロードし、処理が完了するまで待つ
       await topup(newData, widget.chargeAmount);
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(error.toString()),
+            duration: const Duration(seconds: 8)));
+      return;
     } finally {
       // ダイアログを閉じる
       if (_isDialogShowing) {
@@ -737,9 +740,8 @@ class _AlertDialogSampleState extends State<AlertDialogSample> {
                 });
               },
               onTapCancel: () {
-                _loadSelectPage();
                 setState(() {
-                  // _pressedCancel = false;
+                  _pressedComplete = false;
                 });
               },
               child: Container(
@@ -783,44 +785,7 @@ class _AlertDialogSampleState extends State<AlertDialogSample> {
   }
 }
 
-Future<void> topup(UserData newData, int amount) async {
-  // スプレッドシートの値を読み取る
-  // サービスアカウントの認証情報をロード
-  final credentials = await rootBundle.loadString('assets/credentials.json');
-  final jsonCredentials = jsonDecode(credentials);
-  final gsheets = GSheets(jsonCredentials);
-
-  // スプレッドシートIDを指定
-  final spreadsheetId = '1c8civD4TDvMohN-gQyOrnODUF-On2ZV8HseyWADFfKw';
-
-  // スプレッドシートを取得
-  final ss = await gsheets.spreadsheet(spreadsheetId);
-
-  // シート名を指定してワークシートを取得
-  final userDataSheet = ss.worksheetByTitle('UserData');
-
-  // ユーザの情報を更新する
-  await userDataSheet?.values.map
-      .insertRowByKey(newData.id, newData.toGsheets());
-
-  // チャージ履歴を書きこむ
-  if (newData.id == 0) {
-    // テストコードでは履歴を残したくない
-    return;
-  }
-  final topupHistorySheet = ss.worksheetByTitle('TopupHistory');
-
-  // 最後の行の位置を見つける
-  final allRows = await topupHistorySheet?.values.allRows();
-  if (allRows != null) {
-    int lastRows = allRows.length + 1;
-    TopupHistory newHistory = TopupHistory(
-      time: DateTime.now().toString(),
-      userID: newData.id,
-      amount: amount,
-      afterTopup: newData.balance,
-    );
-    await topupHistorySheet?.values.map
-        .insertRow(lastRows, newHistory.toGsheets());
-  }
+Future<void> topup(UserData user, int amount) async {
+  user.applyApi(await GasApi.instance
+      .transact('topup', user.sessionToken, {'amount': amount}));
 }

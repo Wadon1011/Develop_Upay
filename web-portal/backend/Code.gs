@@ -1,4 +1,4 @@
-﻿/**
+/**
  * UPay 残高確認ポータル - GAS(Google Apps Script) バックエンド
  */
 
@@ -14,9 +14,9 @@ var USERID_HEADER_CANDIDATES  = ['userid', 'user_id', 'uid', 'id'];
 
 // QRコード用ワンタイムトークンの有効期限（秒）
 var QR_TOKEN_TTL_SECONDS = 120;
-// レジ端末など、verifyQrTokenを呼ぶ側だけが知っている合言葉。
-// 実際にレジ側からこの検証APIを呼ぶ改修を行う前に、必ず推測困難な値に変更すること。
-var REGISTER_API_KEY = 'CHANGE_ME_REGISTER_API_KEY';
+// QR検証後に発行するレジセッションの有効期間。
+// プロジェクトの設定 → スクリプトプロパティに登録する。ソースには鍵を置かない。
+var REGISTER_SESSION_TTL_SECONDS = 1800;
 
 // 「補充希望」リアクションを保存するシート（なければ自動作成）
 var REACTION_SHEET_NAME = 'ItemReactions';
@@ -47,6 +47,7 @@ function doGet(e) {
       for (var i = 0; i < headers.length; i++) {
         if (String(headers[i]).trim() === key) { colIdx[key] = i; }
       }
+      if (colIdx[key] === undefined) throw new Error('ItemDataに' + key + '列がありません。');
     });
 
     var reservedCounts = getActiveReservedCounts_(spreadsheet);
@@ -58,12 +59,12 @@ function doGet(e) {
       var soldOut = row[colIdx['SoldOut']];
       if (soldOut === true || String(soldOut).toLowerCase() === 'true') continue;
       var itemId = row[colIdx['ItemID']];
-      var rawStock = Number(row[colIdx['Stock']]) || 0;
+      var rawStock = nonnegativeInteger_(row[colIdx['Stock']], 'Stock');
       var reserved = reservedCounts[String(itemId)] || 0;
       items.push({
         id:            itemId,
         name:          row[colIdx['Name']],
-        price:         row[colIdx['Price']],
+        price:         nonnegativeInteger_(row[colIdx['Price']], 'Price'),
         stock:         Math.max(0, rawStock - reserved),
         image:         row[colIdx['ImagePath']],
         category:      row[colIdx['Category']],
@@ -92,9 +93,12 @@ function doPost(e) {
     var requestBody = parseRequestBody_(e);
     var action = (requestBody && requestBody.action) || 'balance';
 
-    // ログイン不要（誰でも利用可）のアクションはここで処理する
+    // Google IDトークン不要のアクション。レジAPIは独自のキー・セッション認証を行う。
     if (action === 'verifyQrToken') return jsonResponse_(verifyQrToken_(requestBody));
     if (action === 'toggleRestockReaction') return jsonResponse_(toggleRestockReaction_(requestBody));
+    if (['purchase', 'topup', 'claimGift'].indexOf(action) !== -1) {
+      return jsonResponse_(registerTransaction_(requestBody));
+    }
 
     var idToken = requestBody && requestBody.idToken;
     if (!idToken) return jsonResponse_({ success: false, error: 'idTokenが送信されていません。' });
@@ -146,28 +150,27 @@ function issueQrToken_(email) {
  * レジ端末など、ユーザーのGoogleログインを持たない側からトークンを検証するためのAPI。
  * apiKeyがREGISTER_API_KEYと一致しない場合は拒否する。
  * 検証に成功したトークンはその場で無効化される（使い捨て）。
- * 現時点ではこのAPIを呼び出すレジ端末側の改修は別途行う想定で、ここではAPIの提供のみ行う。
+ * 検証した本人の情報と、購入・チャージ・ギフト用の短期セッションを返す。
  */
 function verifyQrToken_(requestBody) {
-  var apiKey = requestBody && requestBody.apiKey;
-  if (!apiKey || apiKey !== REGISTER_API_KEY) {
-    return { success: false, error: '検証用のAPIキーが正しくありません。' };
+  requireRegisterKey_(requestBody);
+  if (typeof requestBody.token !== 'string' || !/^[a-f0-9]{32}$/.test(requestBody.token)) {
+    throw new Error('Webポータルに表示されたQRコードを読み取ってください。');
   }
-
-  var token = requestBody && requestBody.token;
-  if (!token) return { success: false, error: 'tokenが送信されていません。' };
-
-  var cache = CacheService.getScriptCache();
-  var key = 'qrtoken_' + token;
-  var raw = cache.get(key);
-  if (!raw) return { success: false, error: 'トークンが無効か、期限切れです。' };
-
-  cache.remove(key); // 使い捨てにする（同じトークンは二度と使えない）
-
-  var payload;
-  try { payload = JSON.parse(raw); } catch (err) { return { success: false, error: 'トークンデータの解析に失敗しました。' }; }
-
-  return { success: true, userId: payload.userId };
+  return withRegisterLock_(function() {
+    var cache = CacheService.getScriptCache();
+    var key = 'qrtoken_' + requestBody.token;
+    var raw = cache.get(key);
+    if (!raw) throw new Error('QRコードが無効か期限切れです。新しいQRを読み取ってください。');
+    var payload = JSON.parse(raw);
+    var table = registerTable_(SpreadsheetApp.openById(SPREADSHEET_ID), SHEET_NAME, USER_FIELDS_);
+    var user = registerUser_(table, payload.userId);
+    var sessionToken = Utilities.getUuid().replace(/-/g, '');
+    cache.put('register_' + sessionToken, JSON.stringify({userId: String(user.UserID)}), REGISTER_SESSION_TTL_SECONDS);
+    cache.remove(key);
+    return {success: true, userId: user.UserID, user: user, sessionToken: sessionToken,
+      expiresInSeconds: REGISTER_SESSION_TTL_SECONDS};
+  });
 }
 
 /**
@@ -559,4 +562,194 @@ function findColumnIndex_(headers, candidates) {
 
 function jsonResponse_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// レジAPI。全書き込みを同じScriptLockとSheets.batchUpdateで処理する。
+var USER_FIELDS_ = ['UserID', 'UserName', 'Balance', 'PurchaseNum', 'TotalAmount', 'GiftAmount'];
+var ITEM_FIELDS_ = ['ItemID', 'Name', 'Price', 'Stock', 'SalesFigure', 'SoldOut'];
+var RECEIPT_FIELDS_ = ['RequestID', 'Session', 'Payload', 'Result'];
+
+function requireRegisterKey_(body) {
+  var key = PropertiesService.getScriptProperties().getProperty('REGISTER_API_KEY');
+  if (!key || key.length < 32 || key === 'CHANGE_ME_REGISTER_API_KEY' || !body || body.apiKey !== key) {
+    throw new Error('レジAPIキーが未設定か一致しません。');
+  }
+}
+
+function withRegisterLock_(callback) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) throw new Error('処理が混雑しています。同じ操作を再試行してください。');
+  try { return callback(); } finally { lock.releaseLock(); }
+}
+
+function registerTable_(ss, name, required) {
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) throw new Error(name + 'シートがありません。');
+  var rows = sheet.getDataRange().getValues();
+  var columns = {};
+  required.forEach(function(field) {
+    var candidates = field === 'Balance' ? BALANCE_HEADER_CANDIDATES :
+      field === 'UserID' ? USERID_HEADER_CANDIDATES : [field];
+    var index = findColumnIndex_(rows[0], candidates);
+    if (index < 0) throw new Error(name + 'に' + field + '列がありません。');
+    columns[field] = index;
+  });
+  return {sheet: sheet, rows: rows, columns: columns};
+}
+
+function registerRow_(table, field, id) {
+  var matches = [];
+  for (var i = 1; i < table.rows.length; i++) {
+    if (String(table.rows[i][table.columns[field]]).trim() === String(id).trim()) matches.push(i);
+  }
+  if (matches.length !== 1) throw new Error(field + 'が未登録または重複しています。');
+  return matches[0];
+}
+
+function nonnegativeInteger_(value, label) {
+  if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') {
+    throw new Error(label + 'は0以上の整数が必要です。');
+  }
+  var number = Number(value);
+  if (!Number.isSafeInteger(number) || number < 0) throw new Error(label + 'は0以上の整数が必要です。');
+  return number;
+}
+
+function registerUser_(table, id) {
+  var row = table.rows[registerRow_(table, 'UserID', id)];
+  var user = {};
+  USER_FIELDS_.forEach(function(field) {
+    var value = row[table.columns[field]];
+    user[field] = field === 'UserID' || field === 'UserName' ? String(value) : nonnegativeInteger_(value, field);
+  });
+  return user;
+}
+
+function cellData_(value) {
+  var key = typeof value === 'number' ? 'numberValue' : typeof value === 'boolean' ? 'boolValue' : 'stringValue';
+  var cell = {userEnteredValue: {}};
+  cell.userEnteredValue[key] = value;
+  return cell;
+}
+
+function updateRegisterCell_(requests, table, row, field, value) {
+  requests.push({updateCells: {
+    start: {sheetId: table.sheet.getSheetId(), rowIndex: row, columnIndex: table.columns[field]},
+    rows: [{values: [cellData_(value)]}], fields: 'userEnteredValue'
+  }});
+}
+
+// 履歴シートがない場合も同じ原子的バッチで作成する。
+function appendRegisterRecord_(ss, requests, name, fields, record) {
+  var sheet = ss.getSheetByName(name);
+  var id;
+  var headers;
+  if (sheet) {
+    id = sheet.getSheetId();
+    headers = sheet.getDataRange().getValues()[0];
+    fields.forEach(function(field) {
+      if (headers.indexOf(field) < 0) throw new Error(name + 'に' + field + '列がありません。');
+    });
+  } else {
+    id = Math.floor(Math.random() * 2000000000) + 1;
+    headers = fields;
+    requests.push({addSheet: {properties: {sheetId: id, title: name}}});
+    requests.push({appendCells: {sheetId: id, rows: [{values: headers.map(cellData_)}], fields: 'userEnteredValue'}});
+  }
+  requests.push({appendCells: {sheetId: id,
+    rows: [{values: headers.map(function(field) { return cellData_(record[field] === undefined ? '' : record[field]); })}],
+    fields: 'userEnteredValue'}});
+}
+
+function registerTransaction_(body) {
+  requireRegisterKey_(body);
+  if (typeof body.sessionToken !== 'string' || !/^[a-f0-9]{32}$/.test(body.sessionToken)) throw new Error('QRを読み取り直してください。');
+  if (typeof body.requestId !== 'string' || !/^[a-f0-9]{32}$/.test(body.requestId)) throw new Error('requestIdが不正です。');
+  return withRegisterLock_(function() {
+    var rawSession = CacheService.getScriptCache().get('register_' + body.sessionToken);
+    if (!rawSession) throw new Error('セッションの期限が切れました。QRを読み取り直してください。');
+    var userId = JSON.parse(rawSession).userId;
+    var sessionHash = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, body.sessionToken));
+    var signature = JSON.stringify({action: body.action, items: body.items || null, amount: body.amount === undefined ? null : body.amount});
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    // 応答喪失後も同じrequestIdなら保存済み結果を返す。キャッシュを台帳にしない。
+    var ledger = ss.getSheetByName('RegisterRequests');
+    var purchaseCompleted = false;
+    if (ledger) {
+      var receipts = registerTable_(ss, 'RegisterRequests', RECEIPT_FIELDS_);
+      for (var r = 1; r < receipts.rows.length; r++) {
+        var receipt = receipts.rows[r];
+        if (receipt[receipts.columns.Session] !== sessionHash) continue;
+        if (receipt[receipts.columns.RequestID] === body.requestId) {
+          if (receipt[receipts.columns.Payload] !== signature) throw new Error('同じrequestIdで内容を変更できません。');
+          return JSON.parse(receipt[receipts.columns.Result]);
+        }
+        if (JSON.parse(receipt[receipts.columns.Payload]).action === 'purchase') purchaseCompleted = true;
+      }
+    }
+    if (purchaseCompleted) throw new Error('このセッションは決済済みです。QRを読み取り直してください。');
+    var users = registerTable_(ss, SHEET_NAME, USER_FIELDS_);
+    var userRow = registerRow_(users, 'UserID', userId);
+    var user = registerUser_(users, userId);
+    var requests = [];
+    var now = new Date();
+    var amount = 0;
+    if (body.action === 'purchase') {
+      if (!Array.isArray(body.items) || !body.items.length || body.items.length > 100) throw new Error('商品を1〜100種類選択してください。');
+      var items = registerTable_(ss, ITEM_SHEET_NAME, ITEM_FIELDS_);
+      var quantities = {};
+      body.items.forEach(function(item) {
+        if (!item || !Number.isSafeInteger(item.itemId) || item.itemId < 0 || !Number.isSafeInteger(item.quantity) || item.quantity <= 0) {
+          throw new Error('商品ID・個数が不正です。');
+        }
+        quantities[item.itemId] = nonnegativeInteger_((quantities[item.itemId] || 0) + item.quantity, '個数');
+      });
+      var ids = [], names = [], numbers = [];
+      Object.keys(quantities).sort().forEach(function(id) {
+        var rowIndex = registerRow_(items, 'ItemID', id);
+        var row = items.rows[rowIndex];
+        var quantity = quantities[id];
+        var stock = nonnegativeInteger_(row[items.columns.Stock], 'Stock');
+        var price = nonnegativeInteger_(row[items.columns.Price], 'Price');
+        var soldOut = row[items.columns.SoldOut];
+        if (String(soldOut).toLowerCase() === 'true' || stock < quantity) throw new Error(String(row[items.columns.Name]) + 'の在庫が不足しています。');
+        amount = nonnegativeInteger_(amount + price * quantity, '購入金額');
+        updateRegisterCell_(requests, items, rowIndex, 'Stock', stock - quantity);
+        updateRegisterCell_(requests, items, rowIndex, 'SalesFigure', nonnegativeInteger_(nonnegativeInteger_(row[items.columns.SalesFigure], 'SalesFigure') + quantity, 'SalesFigure'));
+        updateRegisterCell_(requests, items, rowIndex, 'SoldOut', stock === quantity);
+        ids.push(id); names.push(String(row[items.columns.Name])); numbers.push(quantity);
+      });
+      if (user.Balance < amount) throw new Error('残高が不足しています。');
+      user.Balance -= amount;
+      user.PurchaseNum = nonnegativeInteger_(user.PurchaseNum + numbers.reduce(function(a, b) { return a + b; }, 0), 'PurchaseNum');
+      user.TotalAmount = nonnegativeInteger_(user.TotalAmount + amount, 'TotalAmount');
+      appendRegisterRecord_(ss, requests, 'PurchaseHistory' + Utilities.formatDate(now, 'Asia/Tokyo', 'yyMM'),
+        ['DateTime', 'UserID', 'ItemID', 'ItemName', 'Number', 'AfterPurchase', 'AmountSpent'],
+        {DateTime: now.toISOString(), UserID: user.UserID, ItemID: ids.join(','), ItemName: names.join(','),
+          Number: numbers.join(','), AfterPurchase: user.Balance, AmountSpent: amount});
+    } else if (body.action === 'topup' || body.action === 'claimGift') {
+      if (body.action === 'topup') {
+        // 現金受領はAPIでは検証できないため、管理者が明示的に有効化した端末のみ。
+        if (PropertiesService.getScriptProperties().getProperty('ALLOW_REGISTER_TOPUP') !== 'true') throw new Error('この環境では現金チャージが無効です。');
+        if (!Number.isSafeInteger(body.amount) || body.amount <= 0 || body.amount > 100000) throw new Error('チャージ額は1〜100000の整数で指定してください。');
+        amount = body.amount;
+      } else {
+        amount = user.GiftAmount;
+        if (amount <= 0) throw new Error('受け取り可能なギフトがありません。');
+        user.GiftAmount = 0;
+      }
+      user.Balance = nonnegativeInteger_(user.Balance + amount, 'Balance');
+      appendRegisterRecord_(ss, requests, TOPUP_SHEET_NAME, ['DateTime', 'UserID', 'Amount', 'AfterTopup'],
+        {DateTime: now.toISOString(), UserID: user.UserID, Amount: amount, AfterTopup: user.Balance});
+    } else { throw new Error('未対応のレジ操作です。'); }
+    ['Balance', 'PurchaseNum', 'TotalAmount', 'GiftAmount'].forEach(function(field) {
+      updateRegisterCell_(requests, users, userRow, field, user[field]);
+    });
+    var result = {success: true, user: user, amount: amount, requestId: body.requestId};
+    appendRegisterRecord_(ss, requests, 'RegisterRequests', RECEIPT_FIELDS_,
+      {RequestID: body.requestId, Session: sessionHash, Payload: signature, Result: JSON.stringify(result)});
+    // 残高・在庫・履歴・再試行台帳をすべて成功またはすべて失敗にする。
+    Sheets.Spreadsheets.batchUpdate({requests: requests}, SPREADSHEET_ID);
+    return result;
+  });
 }
