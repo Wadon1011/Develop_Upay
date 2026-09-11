@@ -236,7 +236,7 @@ test('authenticated reservation routes retain duplicate checks, ownership and ca
   assert.equal(f.post({action:'myReservations',idToken:reserve.idToken}).reservations.length, 0);
 });
 
-test('catalog combines reserved stock, reaction count and register numeric validation', () => {
+test('catalog combines reserved stock, reaction count and tolerant price display', () => {
   const f = setup();
   f.rows('ItemData')[0].push('ImagePath', 'Category');
   f.rows('ItemData')[1].push('images/chips.png', 'snack');
@@ -252,7 +252,32 @@ test('catalog combines reserved stock, reaction count and register numeric valid
   assert.equal(f.context.doGet({}).items.find(i => i.id === 3).stock, 5);
   assert.equal(f.rows('Reservations')[1][5], 'expired');
   f.rows('ItemData')[1][2] = 'invalid';
-  assert.equal(f.context.doGet({}).success, false);
+  const fallback = f.context.doGet({});
+  assert.equal(fallback.success, true);
+  assert.equal(fallback.items.find(i => i.id === 3).price, 0);
+  assert.equal(f.post(f.request()).success, false);
+  assert.equal(f.count(), 0);
+});
+
+test('blank and nonnumeric catalog values do not hide other products; purchase stays strict', () => {
+  for (const field of ['Price', 'Stock']) {
+    for (const value of ['', '   ', 'invalid', null]) {
+      const f = setup();
+      f.rows('ItemData')[0].push('ImagePath', 'Category');
+      f.rows('ItemData')[1].push('images/chips.png', 'snack');
+      f.rows('ItemData')[2].push('images/tea.png', 'drink');
+      f.rows('ItemData')[1][f.rows('ItemData')[0].indexOf(field)] = value;
+      const result = f.context.doGet({});
+      assert.equal(result.success, true);
+      assert.equal(result.items.length, 2);
+      assert.equal(result.items.find(i => i.id === 3)[field.toLowerCase()], 0);
+      assert.equal(result.items.find(i => i.id === 4).price, 100);
+      assert.equal(result.items.find(i => i.id === 4).stock, 1);
+      assert.equal(f.post(f.request()).success, false);
+      assert.equal(f.count(), 0);
+      assert.equal(f.rows('UserData')[1][2], 1000);
+    }
+  }
 });
 
 test('reservation capacity is enforced and expiry frees a reservation slot', () => {

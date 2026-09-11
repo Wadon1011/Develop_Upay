@@ -59,12 +59,13 @@ function doGet(e) {
       var soldOut = row[colIdx['SoldOut']];
       if (soldOut === true || String(soldOut).toLowerCase() === 'true') continue;
       var itemId = row[colIdx['ItemID']];
-      var rawStock = nonnegativeInteger_(row[colIdx['Stock']], 'Stock');
+      // 一覧は既存データの空欄・非数値を0として表示する。購入時は別途厳密に検証する。
+      var rawStock = Number(row[colIdx['Stock']]) || 0;
       var reserved = reservedCounts[String(itemId)] || 0;
       items.push({
         id:            itemId,
         name:          row[colIdx['Name']],
-        price:         nonnegativeInteger_(row[colIdx['Price']], 'Price'),
+        price:         Number(row[colIdx['Price']]) || 0,
         stock:         Math.max(0, rawStock - reserved),
         image:         row[colIdx['ImagePath']],
         category:      row[colIdx['Category']],
