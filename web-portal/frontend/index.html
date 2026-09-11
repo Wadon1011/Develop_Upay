@@ -699,24 +699,13 @@ body {
   line-height: 1.6;
   margin: 14px 0 0;
 }
-.qr-save-btn {
-  margin-top: 16px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 20px;
-  border-radius: 999px;
-  border: none;
-  background: var(--accent);
-  color: #fff;
-  font-family: 'Outfit', sans-serif;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background .15s;
+.qr-countdown {
+  font-size: 11px;
+  color: var(--text-sub);
+  margin: 6px 0 0;
+  font-variant-numeric: tabular-nums;
+  display: none;
 }
-.qr-save-btn:hover { background: var(--accent-deep); }
-.qr-save-btn svg { width: 15px; height: 15px; stroke: currentColor; }
 
 /* ── Shared ──────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
@@ -804,10 +793,7 @@ body {
         <p class="qr-id" id="qrId">—</p>
         <div class="qr-box" id="qrBox"></div>
         <p class="qr-note" id="qrNote">このQRコードをUPay端末のカメラで読み取れます</p>
-        <button class="qr-save-btn" id="qrSaveBtn" onclick="saveQr()">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          QRコードを保存
-        </button>
+        <p class="qr-countdown" id="qrCountdown"></p>
       </div>
 
       <!-- サインインカード（未ログイン時） -->
@@ -881,6 +867,7 @@ const CAT_EMOJI = { drink: '🥤', snack: '🍫', food: '🍜', other: '📦' };
 let allItems = [];
 let activeCategory = 'all';
 let signedInEmail = null;
+let currentIdToken = null;
 
 // ── Tab switching ────────────────────────────────────────────
 const TABS = {
@@ -1016,13 +1003,20 @@ function showBalanceCard(balance, email, data) {
 }
 
 // ── QRコード ─────────────────────────────────────────────────
-function renderQr(data) {
-  const card = document.getElementById('qrCard');
-  const box  = document.getElementById('qrBox');
-  const idEl = document.getElementById('qrId');
-  const note = document.getElementById('qrNote');
-  const btn  = document.getElementById('qrSaveBtn');
+// QRコードには生のUserIDを載せず、その都度サーバー(GAS)が発行する
+// 短命・使い捨てのトークンを載せる。有効期限が近づくと自動的に新しいトークンを取得して再描画する。
+let qrRefreshTimerId = null;
+let qrCountdownTimerId = null;
+let qrTokenExpiresAt = 0;
 
+function renderQr(data) {
+  const card      = document.getElementById('qrCard');
+  const box       = document.getElementById('qrBox');
+  const idEl      = document.getElementById('qrId');
+  const note      = document.getElementById('qrNote');
+  const countdown = document.getElementById('qrCountdown');
+
+  stopQrRefresh();
   box.innerHTML = '';
   card.style.display = 'block';
 
@@ -1032,7 +1026,7 @@ function renderQr(data) {
   if (!columnFound) {
     idEl.textContent = '—';
     box.style.display = 'none';
-    btn.style.display = 'none';
+    countdown.style.display = 'none';
     note.textContent = 'スプレッドシートに「UserID」列が見つかりません。UserData シートのヘッダー行を確認してください。';
     return;
   }
@@ -1040,49 +1034,91 @@ function renderQr(data) {
   if (userId === undefined || userId === null || String(userId).trim() === '') {
     idEl.textContent = '—';
     box.style.display = 'none';
-    btn.style.display = 'none';
+    countdown.style.display = 'none';
     note.textContent = 'あなたの行の UserID が空です。GAS を最新版に再デプロイ済みか、該当行に UserID が入力されているか確認してください。';
     return;
   }
 
-  const value = String(userId).trim();
-  idEl.textContent = value;
+  idEl.textContent = String(userId).trim();
   box.style.display = 'inline-flex';
-  btn.style.display = 'inline-flex';
-  note.textContent = 'このQRコードをUPay端末のカメラで読み取れます';
+  note.textContent = 'このQRコードは自動的に更新されます。画面を保存せず、その場でレジ端末にかざしてください。';
+  countdown.style.display = 'block';
 
-  if (typeof QRCode === 'undefined') {
-    box.style.display = 'none';
-    btn.style.display = 'none';
-    note.textContent = 'QRコードライブラリを読み込めませんでした。通信環境を確認してください。';
-  } else {
+  refreshQrToken();
+}
+
+async function refreshQrToken() {
+  const box       = document.getElementById('qrBox');
+  const note      = document.getElementById('qrNote');
+  const countdown = document.getElementById('qrCountdown');
+
+  if (!currentIdToken) return;
+
+  try {
+    const res = await fetch(GAS_WEB_APP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ idToken: currentIdToken, action: 'issueQrToken' }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '不明なエラー');
+
+    if (typeof QRCode === 'undefined') {
+      box.innerHTML = '';
+      box.style.display = 'none';
+      countdown.style.display = 'none';
+      note.textContent = 'QRコードライブラリを読み込めませんでした。通信環境を確認してください。';
+      return;
+    }
+
+    box.innerHTML = '';
     new QRCode(box, {
-      text: value,
+      text: data.token,
       width: 200,
       height: 200,
       colorDark: '#000000',
       colorLight: '#ffffff',
       correctLevel: QRCode.CorrectLevel.M,
     });
+
+    const ttlSeconds = Number(data.expiresInSeconds) || 120;
+    qrTokenExpiresAt = Date.now() + ttlSeconds * 1000;
+    scheduleQrRefresh(ttlSeconds);
+    startQrCountdown();
+  } catch (err) {
+    note.textContent = 'QRコードの発行に失敗しました: ' + err.message + '（15秒後に再試行します）';
+    qrRefreshTimerId = setTimeout(refreshQrToken, 15000);
   }
-  card.style.display = 'block';
 }
 
-function saveQr() {
-  const box = document.getElementById('qrBox');
-  const canvas = box.querySelector('canvas');
-  const img = box.querySelector('img');
-  const dataUrl = canvas ? canvas.toDataURL('image/png') : (img ? img.src : null);
-  if (!dataUrl) return;
-  const a = document.createElement('a');
-  a.href = dataUrl;
-  a.download = 'upay-userid-' + document.getElementById('qrId').textContent + '.png';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+function scheduleQrRefresh(ttlSeconds) {
+  clearTimeout(qrRefreshTimerId);
+  // 期限が切れる前、余裕を持って次のトークンを取得しておく
+  const refreshInMs = Math.max(ttlSeconds * 1000 * 0.75, 5000);
+  qrRefreshTimerId = setTimeout(refreshQrToken, refreshInMs);
+}
+
+function startQrCountdown() {
+  clearInterval(qrCountdownTimerId);
+  const countdown = document.getElementById('qrCountdown');
+  const tick = () => {
+    const remaining = Math.max(0, Math.round((qrTokenExpiresAt - Date.now()) / 1000));
+    countdown.textContent = `あと${remaining}秒で更新されます`;
+  };
+  tick();
+  qrCountdownTimerId = setInterval(tick, 1000);
+}
+
+function stopQrRefresh() {
+  clearTimeout(qrRefreshTimerId);
+  clearInterval(qrCountdownTimerId);
+  qrRefreshTimerId = null;
+  qrCountdownTimerId = null;
 }
 
 function hideQr() {
+  stopQrRefresh();
   document.getElementById('qrCard').style.display = 'none';
   document.getElementById('qrBox').innerHTML = '';
 }
@@ -1192,6 +1228,7 @@ function resetHistory() {
 
 function handleCredentialResponse(response) {
   const idToken = response.credential;
+  currentIdToken = idToken;
   signedInEmail = parseEmailFromToken(idToken);
   showBalStatus('残高を確認しています…', 'info');
   fetchBalance(idToken);
@@ -1233,6 +1270,7 @@ function handleSignOut() {
     google.accounts.id.revoke(signedInEmail, () => {});
   }
   signedInEmail = null;
+  currentIdToken = null;
   hideQr();
   resetHistory();
   document.getElementById('balanceCard').style.display = 'none';

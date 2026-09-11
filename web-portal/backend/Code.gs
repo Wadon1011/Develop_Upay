@@ -12,6 +12,12 @@ var EMAIL_HEADER_CANDIDATES   = ['email', 'emailaddress', 'mail', 'メールア�
 var BALANCE_HEADER_CANDIDATES = ['balance', 'balanceamount', '残高', '残高額'];
 var USERID_HEADER_CANDIDATES  = ['userid', 'user_id', 'uid', 'id'];
 
+// QRコード用ワンタイムトークンの有効期限（秒）
+var QR_TOKEN_TTL_SECONDS = 120;
+// レジ端末など、verifyQrTokenを呼ぶ側だけが知っている合言葉。
+// 実際にレジ側からこの検証APIを呼ぶ改修を行う前に、必ず推測困難な値に変更すること。
+var REGISTER_API_KEY = 'CHANGE_ME_REGISTER_API_KEY';
+
 /**
  * GET: 認証不要で販売中商品（SoldOut=false）の一覧を返す。
  */
@@ -56,13 +62,18 @@ function doGet(e) {
  * POST: idToken を検証し action に応じた処理を行う。
  *   action 省略 or 'balance' → 残高・UserID を返す
  *   action = 'history'       → 過去2ヶ月の取引履歴（購入＋チャージ）を返す
+ *   action = 'issueQrToken'  → QRコード用のワンタイムトークンを発行する
+ *   action = 'verifyQrToken' → （レジ端末など向け）ワンタイムトークンを検証し、UserIDを返す。idToken不要・apiKey必須。
  */
 function doPost(e) {
   try {
     var requestBody = parseRequestBody_(e);
-    var idToken = requestBody && requestBody.idToken;
-    var action  = (requestBody && requestBody.action) || 'balance';
+    var action = (requestBody && requestBody.action) || 'balance';
 
+    // レジ端末など、ログイン中のユーザーではない側から呼ばれる検証APIはidToken不要
+    if (action === 'verifyQrToken') return jsonResponse_(verifyQrToken_(requestBody));
+
+    var idToken = requestBody && requestBody.idToken;
     if (!idToken) return jsonResponse_({ success: false, error: 'idTokenが送信されていません。' });
 
     var tokenInfo = verifyIdToken_(idToken);
@@ -74,10 +85,63 @@ function doPost(e) {
     if (!email) return jsonResponse_({ success: false, error: 'トークンにメールアドレスが含まれていません。' });
 
     if (action === 'history') return jsonResponse_(getTransactionHistory_(email));
+    if (action === 'issueQrToken') return jsonResponse_(issueQrToken_(email));
     return jsonResponse_(lookupBalanceByEmail_(email));
   } catch (err) {
     return jsonResponse_({ success: false, error: 'サーバー内部エラー: ' + err.message });
   }
+}
+
+/**
+ * ログイン中のユーザー（email）に対して、QRコードに載せるワンタイムトークンを発行する。
+ * トークンとUserIDの対応はCacheServiceに保存し、有効期限が切れると自動的に消える。
+ */
+function issueQrToken_(email) {
+  var lookup = lookupBalanceByEmail_(email);
+  if (!lookup.success) return lookup;
+  if (lookup.userIdColumnFound === false) {
+    return { success: false, error: 'スプレッドシートに「UserID」列が見つかりません。' };
+  }
+  if (lookup.userId === undefined || lookup.userId === null || String(lookup.userId).trim() === '') {
+    return { success: false, error: 'あなたの行の UserID が空です。' };
+  }
+
+  var token = Utilities.getUuid().replace(/-/g, '');
+  var cache = CacheService.getScriptCache();
+  cache.put('qrtoken_' + token, JSON.stringify({
+    userId: String(lookup.userId).trim(),
+    email: email,
+  }), QR_TOKEN_TTL_SECONDS);
+
+  return { success: true, token: token, expiresInSeconds: QR_TOKEN_TTL_SECONDS };
+}
+
+/**
+ * レジ端末など、ユーザーのGoogleログインを持たない側からトークンを検証するためのAPI。
+ * apiKeyがREGISTER_API_KEYと一致しない場合は拒否する。
+ * 検証に成功したトークンはその場で無効化される（使い捨て）。
+ * 現時点ではこのAPIを呼び出すレジ端末側の改修は別途行う想定で、ここではAPIの提供のみ行う。
+ */
+function verifyQrToken_(requestBody) {
+  var apiKey = requestBody && requestBody.apiKey;
+  if (!apiKey || apiKey !== REGISTER_API_KEY) {
+    return { success: false, error: '検証用のAPIキーが正しくありません。' };
+  }
+
+  var token = requestBody && requestBody.token;
+  if (!token) return { success: false, error: 'tokenが送信されていません。' };
+
+  var cache = CacheService.getScriptCache();
+  var key = 'qrtoken_' + token;
+  var raw = cache.get(key);
+  if (!raw) return { success: false, error: 'トークンが無効か、期限切れです。' };
+
+  cache.remove(key); // 使い捨てにする（同じトークンは二度と使えない）
+
+  var payload;
+  try { payload = JSON.parse(raw); } catch (err) { return { success: false, error: 'トークンデータの解析に失敗しました。' }; }
+
+  return { success: true, userId: payload.userId };
 }
 
 function parseRequestBody_(e) {
