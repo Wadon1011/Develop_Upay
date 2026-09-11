@@ -46,10 +46,11 @@ Webポータルに表示されたワンタイムQRを使用してください。
 
 | シート | 必須列 |
 | --- | --- |
-| `UserData` | `UserID`, `UserName`, `Balance`, `PurchaseNum`, `TotalAmount`, `GiftAmount` とポータル用メール列 |
+| `UserData` | `UserID`, `Balance`, `PurchaseNum`, `TotalAmount`, `GiftAmount` とポータル用メール列（`Email` / `メールアドレス` など） |
 | `ItemData` | `ItemID`, `Name`, `Price`, `Stock`, `SalesFigure`, `SoldOut`, `ImagePath`, `Category` |
 
 残高列とユーザーID列は既存ポータルの別名候補も利用できます。
+`UserName` 列は不要です。表示名にはメールアドレスを使います。インストール済みFlutterとの互換性のため、APIはメールアドレスを `user.UserName` として返します。
 金額・累計・在庫は空欄ではなく0以上の整数を入れます。`UserID` / `ItemID` は数値のIDを使用します。
 `SoldOut` はチェックボックスまたは `true` / `false`、`Category` は `drink` / `snack` / `food`。
 `ImagePath` はFlutter内の `images/...` アセットのパスを指定してください。

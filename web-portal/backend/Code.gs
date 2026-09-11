@@ -566,7 +566,7 @@ function jsonResponse_(obj) {
 }
 
 // レジAPI。全書き込みを同じScriptLockとSheets.batchUpdateで処理する。
-var USER_FIELDS_ = ['UserID', 'UserName', 'Balance', 'PurchaseNum', 'TotalAmount', 'GiftAmount'];
+var USER_FIELDS_ = ['UserID', 'Email', 'Balance', 'PurchaseNum', 'TotalAmount', 'GiftAmount'];
 var ITEM_FIELDS_ = ['ItemID', 'Name', 'Price', 'Stock', 'SalesFigure', 'SoldOut'];
 var RECEIPT_FIELDS_ = ['RequestID', 'Session', 'Payload', 'Result'];
 
@@ -590,7 +590,8 @@ function registerTable_(ss, name, required) {
   var columns = {};
   required.forEach(function(field) {
     var candidates = field === 'Balance' ? BALANCE_HEADER_CANDIDATES :
-      field === 'UserID' ? USERID_HEADER_CANDIDATES : [field];
+      field === 'UserID' ? USERID_HEADER_CANDIDATES :
+      field === 'Email' ? EMAIL_HEADER_CANDIDATES : [field];
     var index = findColumnIndex_(rows[0], candidates);
     if (index < 0) throw new Error(name + 'に' + field + '列がありません。');
     columns[field] = index;
@@ -621,7 +622,14 @@ function registerUser_(table, id) {
   var user = {};
   USER_FIELDS_.forEach(function(field) {
     var value = row[table.columns[field]];
-    user[field] = field === 'UserID' || field === 'UserName' ? String(value) : nonnegativeInteger_(value, field);
+    if (field === 'Email') {
+      // インストール済みFlutterとの互換性のため返却キーはUserNameを維持する。
+      // シートのUserName列は不要。表示名にはポータルと同じメールアドレスを使う。
+      user.UserName = String(value || '').trim().toLowerCase();
+      if (!user.UserName) throw new Error('UserDataのメールアドレスが空です。');
+    } else {
+      user[field] = field === 'UserID' ? String(value) : nonnegativeInteger_(value, field);
+    }
   });
   return user;
 }

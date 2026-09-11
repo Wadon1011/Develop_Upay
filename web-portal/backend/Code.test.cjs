@@ -76,6 +76,7 @@ test('purchase uses server price, updates balance/stock/counters and monthly his
   assert.equal(result.user.Balance, 700);
   assert.equal(result.user.PurchaseNum, 2);
   assert.equal(result.user.TotalAmount, 300);
+  assert.equal(result.user.UserName, 'test@example.com');
   assert.equal(f.rows('ItemData')[1][3], 3);
   assert.equal(f.rows('ItemData')[1][4], 2);
   assert.equal(f.rows('PurchaseHistory2609')[1][6], 300);
@@ -207,6 +208,33 @@ test('expired QR and expired session are rejected without updates', () => {
   assert.equal(f.post({action:'verifyQrToken',apiKey:f.key,token:f.token}).success, false);
   assert.equal(f.post(f.request()).success, false);
   assert.equal(f.count(), 0);
+});
+
+test('email-only user schema supports QR verification and all register transactions', () => {
+  for (const header of ['Email', 'メールアドレス', ' emailaddress ']) {
+    for (const action of ['purchase', 'topup', 'claimGift']) {
+      const f = setup();
+      const rows = f.rows('UserData');
+      const nameColumn = rows[0].indexOf('UserName');
+      rows.forEach(row => row.splice(nameColumn, 1));
+      const emailColumn = rows[0].indexOf('Email');
+      rows[0][emailColumn] = header;
+      rows[1][emailColumn] = ' Test@Example.com ';
+      const verified = f.post({action:'verifyQrToken',apiKey:f.key,token:f.token});
+      assert.equal(verified.success, true);
+      assert.equal(verified.user.UserName, 'test@example.com');
+      f.properties.ALLOW_REGISTER_TOPUP = 'true';
+      const request = f.request({action, sessionToken:verified.sessionToken, amount:500});
+      const result = f.post(request);
+      assert.equal(result.success, true);
+      assert.equal(result.user.UserName, 'test@example.com');
+      assert.equal(result.user.Balance, {purchase:700, topup:1500, claimGift:1200}[action]);
+      assert.deepEqual(f.post(request), result);
+      assert.equal(f.count(), 1);
+      assert.equal(f.rows('UserData')[1][emailColumn], ' Test@Example.com ');
+      assert.equal(f.rows('UserData')[0].includes('UserName'), false);
+    }
+  }
 });
 
 test('restock route remains public and counts toggle without going below zero', () => {
