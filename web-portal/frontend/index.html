@@ -723,6 +723,124 @@ body {
   display: none;
 }
 
+/* ── CARD ACTIONS (リアクション・予約) ───────────────────────── */
+.card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.reaction-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--text-sub);
+  font-family: 'Outfit', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+}
+.reaction-btn:hover { border-color: var(--warn); color: #B45309; }
+.reaction-btn.active {
+  background: var(--warn-pale);
+  border-color: var(--warn);
+  color: #B45309;
+}
+.reaction-count { font-variant-numeric: tabular-nums; }
+.reserve-btn {
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-family: 'Outfit', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s;
+}
+.reserve-btn:hover { background: var(--accent-deep); }
+.reserve-btn.reserved {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1.5px solid var(--border);
+}
+
+/* ── RESERVATION SECTION（アカウントタブ内）───────────────────── */
+.reservation-section { width: 100%; display: none; }
+.reservation-list {
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.reservation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.reservation-row:last-child { border-bottom: none; }
+.reservation-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.reservation-timer {
+  font-size: 11px;
+  color: var(--text-sub);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+.reservation-cancel-btn {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--danger);
+  font-family: 'Outfit', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+}
+.reservation-cancel-btn:hover { border-color: var(--danger); background: #FEE2E2; }
+.reservation-empty {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-sub);
+  font-size: 13px;
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+/* ── TOAST ───────────────────────────────────────────────── */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--nav-h) + 16px);
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--bg);
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 12px;
+  box-shadow: var(--shadow-hover);
+  z-index: 200;
+  max-width: 90%;
+  text-align: center;
+}
+
 /* ── Shared ──────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .card, .card-img, .skeleton-line { animation: none; transition: none; }
@@ -815,6 +933,15 @@ body {
         <p class="qr-countdown" id="qrCountdown"></p>
       </div>
 
+      <!-- 予約中の商品（ログイン後、予約があるときだけ表示） -->
+      <div class="reservation-section" id="reservationSection">
+        <div class="history-header">
+          <h3 class="history-title">予約中の商品</h3>
+        </div>
+        <div class="reservation-list" id="reservationList" hidden></div>
+        <div class="reservation-empty" id="reservationEmpty" hidden>予約中の商品はありません</div>
+      </div>
+
       <!-- サインインカード（未ログイン時） -->
       <div class="signin-card" id="signinCard">
         <div class="signin-icon">
@@ -873,6 +1000,9 @@ body {
   </button>
 </nav>
 
+<!-- ── Toast ──────────────────────────────────────────────── -->
+<div class="toast" id="toast" hidden></div>
+
 <script>
 // ── 設定 ─────────────────────────────────────────────────────
 const GOOGLE_CLIENT_ID = '605638314023-5rb9s3ukrkal634henma3trbnp17pfvq.apps.googleusercontent.com';
@@ -903,6 +1033,18 @@ let allItems = [];
 let activeCategory = 'all';
 let signedInEmail = null;
 let currentIdToken = null;
+let myReservationsList = [];
+let myReservationsByItemId = {};
+
+// ── トースト通知 ──────────────────────────────────────────────
+let toastTimerId = null;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.hidden = false;
+  clearTimeout(toastTimerId);
+  toastTimerId = setTimeout(() => { el.hidden = true; }, 3500);
+}
 
 // ── Tab switching ────────────────────────────────────────────
 const TABS = {
@@ -932,6 +1074,81 @@ function escHtml(str) {
   return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── 補充希望リアクション（ログイン不要・端末ごとにON/OFFを記憶） ──────
+function hasReacted(itemId) {
+  try { return localStorage.getItem('upay_reacted_' + itemId) === '1'; } catch { return false; }
+}
+function setReacted(itemId, reacted) {
+  try {
+    if (reacted) localStorage.setItem('upay_reacted_' + itemId, '1');
+    else localStorage.removeItem('upay_reacted_' + itemId);
+  } catch { /* localStorageが使えない環境では単に記憶されない */ }
+}
+
+async function handleReactionClick(itemId) {
+  const add = !hasReacted(itemId);
+  setReacted(itemId, add);
+  renderGrid(); // 楽観的にUIを更新
+  try {
+    const res = await fetch(GAS_WEB_APP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'toggleRestockReaction', itemId, add }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '不明なエラー');
+    const item = allItems.find(it => String(it.id) === String(itemId));
+    if (item) item.reactionCount = data.count;
+    renderGrid();
+  } catch (err) {
+    setReacted(itemId, !add); // 失敗したら元に戻す
+    renderGrid();
+    showToast('リアクションの送信に失敗しました: ' + err.message);
+  }
+}
+
+// ── 在庫予約 ─────────────────────────────────────────────────
+async function handleReserveClick(itemId) {
+  if (!currentIdToken) {
+    showToast('予約にはサインインが必要です。アカウントタブからサインインしてください。');
+    switchTab('balance');
+    return;
+  }
+  try {
+    const res = await fetch(GAS_WEB_APP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ idToken: currentIdToken, action: 'reserveItem', itemId }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '不明なエラー');
+    showToast('在庫をキープしました。2時間以内にレジでお受け取りください。');
+    await Promise.all([reloadItems(), fetchMyReservations()]);
+  } catch (err) {
+    showToast('予約に失敗しました: ' + err.message);
+  }
+}
+
+async function handleCancelReservation(reservationId) {
+  if (!currentIdToken) return;
+  try {
+    const res = await fetch(GAS_WEB_APP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ idToken: currentIdToken, action: 'cancelReservation', reservationId }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '不明なエラー');
+    showToast('予約を取り消しました。');
+    await Promise.all([reloadItems(), fetchMyReservations()]);
+  } catch (err) {
+    showToast('取り消しに失敗しました: ' + err.message);
+  }
+}
+
 function buildCard(item) {
   const cat = (item.category || 'other').toLowerCase();
   const stock = Number(item.stock);
@@ -945,6 +1162,18 @@ function buildCard(item) {
   } else {
     stockClass = ''; stockLabel = `在庫 ${stock}`;
     badgeClass = 'stock-ok'; badgeLabel = `${stock}`;
+  }
+
+  const itemIdStr = String(item.id);
+  const reacted = hasReacted(itemIdStr);
+  const reactionCount = Number(item.reactionCount) || 0;
+
+  const myReservation = myReservationsByItemId[itemIdStr];
+  let reserveBtnHtml = '';
+  if (myReservation) {
+    reserveBtnHtml = `<button class="reserve-btn reserved" onclick="handleCancelReservation('${escHtml(myReservation.reservationId)}')">予約中・取り消す</button>`;
+  } else if (stock >= 1) {
+    reserveBtnHtml = `<button class="reserve-btn" onclick="handleReserveClick('${escHtml(itemIdStr)}')">在庫をキープ（2時間）</button>`;
   }
 
   const card = document.createElement('article');
@@ -961,6 +1190,12 @@ function buildCard(item) {
       <div class="card-footer">
         <div class="card-price"><span>¥</span>${Number(item.price).toLocaleString()}</div>
         <div class="card-stock ${stockClass}">${stockLabel}</div>
+      </div>
+      <div class="card-actions">
+        <button class="reaction-btn ${reacted ? 'active' : ''}" onclick="handleReactionClick('${escHtml(itemIdStr)}')">
+          📦 補充希望<span class="reaction-count">${reactionCount > 0 ? ' ' + reactionCount : ''}</span>
+        </button>
+        ${reserveBtnHtml}
       </div>
     </div>`;
   return card;
@@ -1005,6 +1240,17 @@ async function loadItems() {
   }
 }
 
+// 予約・リアクションの操作後に、在庫数やカウントを最新化するための再取得
+async function reloadItems() {
+  try {
+    allItems = await loadItems();
+    allItems.sort(compareItemsForDisplay);
+    renderGrid();
+  } catch (err) {
+    showToast('商品情報の再取得に失敗しました: ' + err.message);
+  }
+}
+
 (async () => {
   const loading = document.getElementById('shopLoading');
   const errState = document.getElementById('shopErrorState');
@@ -1020,6 +1266,88 @@ async function loadItems() {
     errState.classList.add('visible');
   }
 })();
+
+// ── 予約一覧（アカウントタブ） ─────────────────────────────────
+async function fetchMyReservations() {
+  if (!currentIdToken) {
+    myReservationsList = [];
+    myReservationsByItemId = {};
+    renderMyReservations();
+    return;
+  }
+  try {
+    const res = await fetch(GAS_WEB_APP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ idToken: currentIdToken, action: 'myReservations' }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '不明なエラー');
+    myReservationsList = data.reservations || [];
+    myReservationsByItemId = {};
+    myReservationsList.forEach(r => { myReservationsByItemId[String(r.itemId)] = r; });
+    renderMyReservations();
+    renderGrid();
+  } catch (err) {
+    console.error('[UPay] 予約情報の取得に失敗:', err);
+  }
+}
+
+function renderMyReservations() {
+  const section = document.getElementById('reservationSection');
+  const list    = document.getElementById('reservationList');
+  const empty   = document.getElementById('reservationEmpty');
+
+  if (!currentIdToken) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+
+  if (myReservationsList.length === 0) {
+    list.hidden = true;
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+  list.hidden = false;
+  list.innerHTML = '';
+  myReservationsList.forEach(r => list.appendChild(buildReservationRow(r)));
+}
+
+function buildReservationRow(r) {
+  const remainMs = Math.max(0, new Date(r.expiresAt).getTime() - Date.now());
+  const mins = Math.floor(remainMs / 60000);
+  const secs = Math.floor((remainMs % 60000) / 1000);
+
+  const row = document.createElement('div');
+  row.className = 'reservation-row';
+  row.innerHTML = `
+    <div>
+      <div class="reservation-name">${escHtml(r.itemName)}</div>
+      <div class="reservation-timer">あと ${mins}分${String(secs).padStart(2, '0')}秒でキャンセル</div>
+    </div>
+    <button class="reservation-cancel-btn" onclick="handleCancelReservation('${escHtml(r.reservationId)}')">取り消す</button>`;
+  return row;
+}
+
+// 1秒ごとにカウントダウン表示を更新し、期限切れの予約はローカルでも取り除く
+setInterval(() => {
+  if (myReservationsList.length === 0) return;
+  const now = Date.now();
+  const before = myReservationsList.length;
+  myReservationsList = myReservationsList.filter(r => new Date(r.expiresAt).getTime() > now);
+  if (myReservationsList.length !== before) {
+    myReservationsByItemId = {};
+    myReservationsList.forEach(r => { myReservationsByItemId[String(r.itemId)] = r; });
+    renderGrid();
+  }
+  renderMyReservations();
+}, 1000);
+
+// 他端末での予約操作などとズレないよう、定期的にサーバーへ問い合わせ直す
+setInterval(() => { if (currentIdToken) fetchMyReservations(); }, 60000);
 
 // ── BALANCE ──────────────────────────────────────────────────
 function showBalStatus(msg, type) {
@@ -1268,9 +1596,10 @@ function handleCredentialResponse(response) {
   signedInEmail = parseEmailFromToken(idToken);
   showBalStatus('残高を確認しています…', 'info');
   fetchBalance(idToken);
-  // 履歴を並列取得
+  // 履歴・予約状況を並列取得
   document.getElementById('historySection').style.display = 'block';
   fetchHistory(idToken);
+  fetchMyReservations();
 }
 
 function parseEmailFromToken(token) {
@@ -1309,6 +1638,10 @@ function handleSignOut() {
   currentIdToken = null;
   hideQr();
   resetHistory();
+  myReservationsList = [];
+  myReservationsByItemId = {};
+  renderMyReservations();
+  renderGrid();
   document.getElementById('balanceCard').style.display = 'none';
   document.getElementById('signoutBtn').style.display = 'none';
   document.getElementById('signinCard').style.display = 'block';
