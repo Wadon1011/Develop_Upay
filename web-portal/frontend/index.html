@@ -535,6 +535,127 @@ body {
 #balStatus.info    { display: block; background: var(--accent-pale); color: var(--accent-deep); }
 #balStatus.error   { display: block; background: #FEE2E2; color: #B91C1C; }
 
+/* ── HISTORY ─────────────────────────────────────────────── */
+.history-section {
+  width: 100%;
+}
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.history-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text);
+}
+.history-period {
+  font-size: 11px;
+  color: var(--text-sub);
+}
+.history-list {
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.history-row:last-child { border-bottom: none; }
+.history-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+.history-date {
+  font-family: 'Outfit', sans-serif;
+  font-size: 11px;
+  color: var(--text-sub);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  min-width: 72px;
+}
+.history-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+}
+.history-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-amount {
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--danger);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.more-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 11px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--accent);
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+}
+.more-btn:hover { background: var(--accent-pale); border-color: var(--accent); }
+.history-empty {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-sub);
+  font-size: 13px;
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+.history-skel {
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.history-skel-row {
+  padding: 11px 16px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.history-skel-row:last-child { border-bottom: none; }
+.history-skel-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--surface-2); flex-shrink: 0; }
+.history-skel-line {
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  height: 11px;
+}
+
 /* ── QR CARD ─────────────────────────────────────────────── */
 .qr-card {
   width: 100%;
@@ -704,6 +825,23 @@ body {
         サインアウト
       </button>
 
+      <!-- 購入履歴 -->
+      <div class="history-section" id="historySection" style="display:none">
+        <div class="history-header">
+          <h3 class="history-title">購入履歴</h3>
+          <span class="history-period" id="historyPeriod"></span>
+        </div>
+        <!-- スケルトン -->
+        <div class="history-skel" id="historySkel">
+          <div class="history-skel-row"><div class="history-skel-dot"></div><div class="history-skel-line" style="width:60px"></div><div class="history-skel-line" style="width:100px;margin-left:8px;flex:1"></div><div class="history-skel-line" style="width:36px;margin-left:8px"></div></div>
+          <div class="history-skel-row"><div class="history-skel-dot"></div><div class="history-skel-line" style="width:60px"></div><div class="history-skel-line" style="width:120px;margin-left:8px;flex:1"></div><div class="history-skel-line" style="width:36px;margin-left:8px"></div></div>
+          <div class="history-skel-row"><div class="history-skel-dot"></div><div class="history-skel-line" style="width:60px"></div><div class="history-skel-line" style="width:90px;margin-left:8px;flex:1"></div><div class="history-skel-line" style="width:36px;margin-left:8px"></div></div>
+        </div>
+        <div class="history-list" id="historyList" hidden></div>
+        <div class="history-empty" id="historyEmpty" hidden>購入履歴がありません</div>
+        <button class="more-btn" id="moreBtn" onclick="showAllHistory()" hidden>もっと見る（過去2ヶ月）</button>
+      </div>
+
     </div>
   </section>
 </div>
@@ -719,14 +857,13 @@ body {
     </svg>
     商品一覧
   </button>
-  <button class="nav-btn" id="navBalance" onclick="switchTab('balance')" aria-label="残高確認">
-    <!-- Wallet icon -->
+  <button class="nav-btn" id="navBalance" onclick="switchTab('balance')" aria-label="アカウント">
+    <!-- Person / account icon -->
     <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="2" y="7" width="20" height="14" rx="2"/>
-      <path d="M16 3H8a2 2 0 0 0-2 2v2h12V5a2 2 0 0 0-2-2z"/>
-      <circle cx="16" cy="14" r="1.5" fill="currentColor" stroke="none"/>
+      <circle cx="12" cy="8" r="4"/>
+      <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
     </svg>
-    残高確認
+    アカウント
   </button>
 </nav>
 
@@ -747,7 +884,7 @@ let signedInEmail = null;
 // ── Tab switching ────────────────────────────────────────────
 const TABS = {
   shop:    { panel: 'panelShop',    nav: 'navShop',    title: '商品一覧' },
-  balance: { panel: 'panelBalance', nav: 'navBalance', title: '残高確認' },
+  balance: { panel: 'panelBalance', nav: 'navBalance', title: 'アカウント' },
 };
 
 function switchTab(tab) {
@@ -949,11 +1086,111 @@ function hideQr() {
   document.getElementById('qrBox').innerHTML = '';
 }
 
+// ── HISTORY ──────────────────────────────────────────────────
+let allHistory = [];
+
+async function fetchHistory(idToken) {
+  try {
+    const res = await fetch(GAS_WEB_APP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ idToken, action: 'history' }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (data.success) {
+      allHistory = data.history || [];
+      renderHistory(3);
+    } else {
+      showHistoryError(data.error);
+    }
+  } catch (err) {
+    showHistoryError(err.message);
+  }
+}
+
+function renderHistory(limit) {
+  const section  = document.getElementById('historySection');
+  const skel     = document.getElementById('historySkel');
+  const list     = document.getElementById('historyList');
+  const empty    = document.getElementById('historyEmpty');
+  const moreBtn  = document.getElementById('moreBtn');
+  const period   = document.getElementById('historyPeriod');
+
+  section.style.display = 'block';
+  skel.hidden = true;
+  list.innerHTML = '';
+
+  if (allHistory.length === 0) {
+    list.hidden = true;
+    empty.hidden = false;
+    moreBtn.hidden = true;
+    period.textContent = '';
+    return;
+  }
+
+  empty.hidden = true;
+  list.hidden = false;
+
+  const items = (limit != null) ? allHistory.slice(0, limit) : allHistory;
+  items.forEach(h => list.appendChild(buildHistoryRow(h)));
+
+  // 期間ラベル
+  const oldest = new Date(allHistory[allHistory.length - 1].dateTime);
+  const newest = new Date(allHistory[0].dateTime);
+  period.textContent = `${oldest.getMonth()+1}/${oldest.getDate()} 〜 ${newest.getMonth()+1}/${newest.getDate()}`;
+
+  moreBtn.hidden = (limit == null) || (allHistory.length <= limit);
+}
+
+function buildHistoryRow(h) {
+  const dt = new Date(h.dateTime);
+  const pad = n => String(n).padStart(2, '0');
+  const dateStr = `${dt.getMonth()+1}/${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+
+  const row = document.createElement('div');
+  row.className = 'history-row';
+  row.innerHTML = `
+    <div class="history-dot"></div>
+    <div class="history-date">${dateStr}</div>
+    <div class="history-main">
+      <div class="history-name">${escHtml(h.itemName)}</div>
+      <div class="history-amount">-¥${Number(h.amountSpent).toLocaleString()}</div>
+    </div>`;
+  return row;
+}
+
+function showAllHistory() {
+  renderHistory(null);
+}
+
+function showHistoryError(msg) {
+  const skel = document.getElementById('historySkel');
+  const section = document.getElementById('historySection');
+  skel.hidden = true;
+  section.style.display = 'block';
+  document.getElementById('historyEmpty').hidden = false;
+  document.getElementById('historyEmpty').textContent = '履歴の取得に失敗しました: ' + msg;
+}
+
+function resetHistory() {
+  allHistory = [];
+  document.getElementById('historySection').style.display = 'none';
+  document.getElementById('historySkel').hidden = false;
+  document.getElementById('historyList').hidden = true;
+  document.getElementById('historyList').innerHTML = '';
+  document.getElementById('historyEmpty').hidden = true;
+  document.getElementById('moreBtn').hidden = true;
+}
+
 function handleCredentialResponse(response) {
   const idToken = response.credential;
   signedInEmail = parseEmailFromToken(idToken);
   showBalStatus('残高を確認しています…', 'info');
   fetchBalance(idToken);
+  // 履歴を並列取得
+  document.getElementById('historySection').style.display = 'block';
+  fetchHistory(idToken);
 }
 
 function parseEmailFromToken(token) {
@@ -990,6 +1227,7 @@ function handleSignOut() {
   }
   signedInEmail = null;
   hideQr();
+  resetHistory();
   document.getElementById('balanceCard').style.display = 'none';
   document.getElementById('signoutBtn').style.display = 'none';
   document.getElementById('signinCard').style.display = 'block';

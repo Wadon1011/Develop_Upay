@@ -1,66 +1,27 @@
 ﻿/**
- * UPay 残高確認ポータル（デモ） - GAS(Google Apps Script) バックエンド
- *
- * frontend/index.html からPOSTされたGoogle IDトークンを検証し、
- * 検証済みのメールアドレスをキーに UserData シートを検索して残高を返す。
- *
- * このスクリプトはサービスアカウント鍵を一切必要としない。
- * スプレッドシートへのアクセスは、このスクリプトを実行するGoogleアカウント
- * （デプロイ時に「実行するユーザー: 自分」を選択した場合はデプロイ者のアカウント）の
- * 権限で行われる。
+ * UPay 残高確認ポータル - GAS(Google Apps Script) バックエンド
  */
 
-// ============================================================
-// 設定値（TODO: ここに実際の値を入れてください）
-// ============================================================
-
-// Google Cloud Console で発行した OAuth 2.0 クライアントID。
-// frontend/index.html 内の GOOGLE_CLIENT_ID と必ず同じ値にすること。
-// TODO: ここに実際の値を入れてください
-var CLIENT_ID = '605638314023-5rb9s3ukrkal634henma3trbnp17pfvq.apps.googleusercontent.com';
-
-// 残高データが入っているスプレッドシートのID。
-// スプレッドシートのURL https://docs.google.com/spreadsheets/d/【この部分】/edit の【この部分】。
-// TODO: ここに実際の値を入れてください
+var CLIENT_ID      = '605638314023-5rb9s3ukrkal634henma3trbnp17pfvq.apps.googleusercontent.com';
 var SPREADSHEET_ID = '1Nvv6gepROM11XAPHPaeU2aRrXSkRyBcGUo4qg5JOkyo';
-
-// 検索対象のシート名
-var SHEET_NAME = 'UserData';
-
-// 商品データのシート名
+var SHEET_NAME      = 'UserData';
 var ITEM_SHEET_NAME = 'ItemData';
 
-// ============================================================
-
-// ヘッダー行から「メールアドレス列」を探すときの候補（大文字小文字・前後空白は無視して比較する）
-var EMAIL_HEADER_CANDIDATES = ['email', 'emailaddress', 'mail', 'メールアドレス', 'メール', 'mailaddress'];
-
-// ヘッダー行から「残高列」を探すときの候補（大文字小文字・前後空白は無視して比較する）
+var EMAIL_HEADER_CANDIDATES   = ['email', 'emailaddress', 'mail', 'メールアドレス', 'メール', 'mailaddress'];
 var BALANCE_HEADER_CANDIDATES = ['balance', 'balanceamount', '残高', '残高額'];
-
-// ヘッダー行から「ユーザーID列」を探すときの候補（大文字小文字・前後空白は無視して比較する）
-var USERID_HEADER_CANDIDATES = ['userid', 'user id', 'user_id', 'ユーザーid', 'ユーザid'];
-
-// QRコードに載せるユーザーIDの桁数。数字のみのIDはこの桁数までゼロ埋めする。
-var USERID_DIGITS = 5;
+var USERID_HEADER_CANDIDATES  = ['userid', 'user_id', 'uid', 'id'];
 
 /**
- * GETリクエストを処理するエントリポイント。
- * 認証不要で販売中商品（SoldOut=false）の一覧を返す。
- * レスポンス(JSON): { "success": true, "items": [...] }
+ * GET: 認証不要で販売中商品（SoldOut=false）の一覧を返す。
  */
 function doGet(e) {
   try {
     var spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
     var sheet = spreadsheet.getSheetByName(ITEM_SHEET_NAME);
-    if (!sheet) {
-      return jsonResponse_({ success: false, error: 'ItemDataシートが見つかりません。' });
-    }
+    if (!sheet) return jsonResponse_({ success: false, error: 'ItemDataシートが見つかりません。' });
 
     var values = sheet.getDataRange().getValues();
-    if (values.length < 2) {
-      return jsonResponse_({ success: true, items: [] });
-    }
+    if (values.length < 2) return jsonResponse_({ success: true, items: [] });
 
     var headers = values[0];
     var colIdx = {};
@@ -84,7 +45,6 @@ function doGet(e) {
         category: row[colIdx['Category']]
       });
     }
-
     return jsonResponse_({ success: true, items: items });
   } catch (err) {
     return jsonResponse_({ success: false, error: 'サーバー内部エラー: ' + err.message });
@@ -92,161 +52,166 @@ function doGet(e) {
 }
 
 /**
- * フロントエンドからのPOSTリクエストを処理するエントリポイント。
- * リクエストボディ(JSON): { "idToken": "<GoogleのIDトークン>" }
- * レスポンス(JSON): { "success": true, "balance": <数値> }
- *              または { "success": false, "error": "<エラーメッセージ>" }
+ * POST: idToken を検証し action に応じた処理を行う。
+ *   action 省略 or 'balance' → 残高・UserID を返す
+ *   action = 'history'       → 過去2ヶ月の購入履歴を返す
  */
 function doPost(e) {
   try {
     var requestBody = parseRequestBody_(e);
     var idToken = requestBody && requestBody.idToken;
-    if (!idToken) {
-      return jsonResponse_({ success: false, error: 'idTokenが送信されていません。' });
-    }
+    var action  = (requestBody && requestBody.action) || 'balance';
+
+    if (!idToken) return jsonResponse_({ success: false, error: 'idTokenが送信されていません。' });
 
     var tokenInfo = verifyIdToken_(idToken);
-    if (tokenInfo.error) {
-      return jsonResponse_({ success: false, error: 'トークンの検証に失敗しました: ' + tokenInfo.error });
-    }
-
-    // aud(トークンの発行先クライアントID)が想定するCLIENT_IDと一致するか必ず確認する。
-    // これを怠ると、他のGoogleアプリ向けに発行されたトークンでもなりすましが可能になる。
-    if (tokenInfo.aud !== CLIENT_ID) {
-      return jsonResponse_({ success: false, error: 'クライアントIDが一致しません。不正なリクエストの可能性があります。' });
-    }
-
-    if (tokenInfo.email_verified !== 'true' && tokenInfo.email_verified !== true) {
-      return jsonResponse_({ success: false, error: 'メールアドレスが確認されていないGoogleアカウントです。' });
-    }
+    if (tokenInfo.error) return jsonResponse_({ success: false, error: 'トークンの検証に失敗しました: ' + tokenInfo.error });
+    if (tokenInfo.aud !== CLIENT_ID) return jsonResponse_({ success: false, error: 'クライアントIDが一致しません。不正なリクエストの可能性があります。' });
+    if (tokenInfo.email_verified !== 'true' && tokenInfo.email_verified !== true) return jsonResponse_({ success: false, error: 'メールアドレスが確認されていないGoogleアカウントです。' });
 
     var email = String(tokenInfo.email || '').trim().toLowerCase();
-    if (!email) {
-      return jsonResponse_({ success: false, error: 'トークンにメールアドレスが含まれていません。' });
-    }
+    if (!email) return jsonResponse_({ success: false, error: 'トークンにメールアドレスが含まれていません。' });
 
-    var result = lookupBalanceByEmail_(email);
-    return jsonResponse_(result);
+    if (action === 'history') return jsonResponse_(getPurchaseHistory_(email));
+    return jsonResponse_(lookupBalanceByEmail_(email));
   } catch (err) {
     return jsonResponse_({ success: false, error: 'サーバー内部エラー: ' + err.message });
   }
 }
 
-/**
- * リクエストボディ(JSON文字列)をパースする。失敗時はnullを返す。
- */
 function parseRequestBody_(e) {
-  if (!e || !e.postData || !e.postData.contents) {
-    return null;
-  }
-  try {
-    return JSON.parse(e.postData.contents);
-  } catch (err) {
-    return null;
-  }
+  if (!e || !e.postData || !e.postData.contents) return null;
+  try { return JSON.parse(e.postData.contents); } catch (err) { return null; }
 }
 
-/**
- * GoogleのtokeninfoエンドポイントでIDトークンを検証する。
- * 有効な場合はデコード済みのペイロード(aud, email, email_verified等を含む)を返す。
- * 無効な場合は { error: "<理由>" } を返す。
- */
 function verifyIdToken_(idToken) {
   var url = 'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken);
   var response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
   var body;
-  try {
-    body = JSON.parse(response.getContentText());
-  } catch (err) {
-    return { error: 'トークン検証応答の解析に失敗しました。' };
-  }
-
-  if (response.getResponseCode() !== 200 || body.error) {
-    return { error: body.error_description || body.error || '無効なトークンです。' };
-  }
+  try { body = JSON.parse(response.getContentText()); } catch (err) { return { error: 'トークン検証応答の解析に失敗しました。' }; }
+  if (response.getResponseCode() !== 200 || body.error) return { error: body.error_description || body.error || '無効なトークンです。' };
   return body;
 }
 
-/**
- * UserDataシートをヘッダー行から動的に列位置を求めて検索し、
- * 該当ユーザーの残高を返す。
- */
 function lookupBalanceByEmail_(email) {
   var spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = spreadsheet.getSheetByName(SHEET_NAME);
-  if (!sheet) {
-    return { success: false, error: 'シート「' + SHEET_NAME + '」が見つかりません。' };
-  }
+  if (!sheet) return { success: false, error: 'シート「' + SHEET_NAME + '」が見つかりません。' };
 
   var values = sheet.getDataRange().getValues();
-  if (values.length < 2) {
-    return { success: false, error: 'データが登録されていません。' };
-  }
+  if (values.length < 2) return { success: false, error: 'データが登録されていません。' };
 
   var headers = values[0];
-  var emailColIdx = findColumnIndex_(headers, EMAIL_HEADER_CANDIDATES);
+  var emailColIdx   = findColumnIndex_(headers, EMAIL_HEADER_CANDIDATES);
   var balanceColIdx = findColumnIndex_(headers, BALANCE_HEADER_CANDIDATES);
-  var userIdColIdx = findColumnIndex_(headers, USERID_HEADER_CANDIDATES);
+  var userIdColIdx  = findColumnIndex_(headers, USERID_HEADER_CANDIDATES);
 
-  if (emailColIdx === -1) {
-    return { success: false, error: 'メールアドレス列が見つかりません。ヘッダー行の列名を確認してください。' };
-  }
-  if (balanceColIdx === -1) {
-    return { success: false, error: '残高列が見つかりません。ヘッダー行の列名を確認してください。' };
-  }
+  if (emailColIdx === -1) return { success: false, error: 'メールアドレス列が見つかりません。' };
+  if (balanceColIdx === -1) return { success: false, error: '残高列が見つかりません。' };
 
   for (var i = 1; i < values.length; i++) {
     var rowEmail = String(values[i][emailColIdx] || '').trim().toLowerCase();
     if (rowEmail === email) {
       var result = { success: true, balance: values[i][balanceColIdx] };
-      result.userIdColumnFound = (userIdColIdx !== -1);
       if (userIdColIdx !== -1) {
-        // 列が見つかった場合は、値が空でも userId キー自体は返す（空文字）。
-        // フロント側で「列なし」と「値が空」を区別できるようにするため。
-        result.userId = formatUserId_(values[i][userIdColIdx]);
+        result.userId = values[i][userIdColIdx];
+        result.userIdColumnFound = true;
+      } else {
+        result.userIdColumnFound = false;
       }
       return result;
     }
   }
-
   return { success: false, error: '未登録ユーザーです' };
 }
 
 /**
- * ユーザーID列の値を、QRコードに載せる文字列へ整形する。
- * 数字のみの場合は USERID_DIGITS 桁までゼロ埋めする。
- * それ以外はトリムした文字列をそのまま返す。空なら空文字を返す。
+ * 過去2ヶ月の PurchaseHistoryYYMM シートからユーザーの購入履歴を返す。
+ * 新しい月のシートが追加されても YYMM 命名規則に従えば自動対応。
  */
-function formatUserId_(rawValue) {
-  var value = String(rawValue == null ? '' : rawValue).trim();
-  if (!value) { return ''; }
-  if (/^\d+$/.test(value)) {
-    while (value.length < USERID_DIGITS) { value = '0' + value; }
+function getPurchaseHistory_(email) {
+  var spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var userSheet = spreadsheet.getSheetByName(SHEET_NAME);
+  if (!userSheet) return { success: false, error: 'UserDataシートが見つかりません。' };
+
+  // email → UserID 変換
+  var userValues = userSheet.getDataRange().getValues();
+  var userHeaders = userValues[0];
+  var emailColIdx  = findColumnIndex_(userHeaders, EMAIL_HEADER_CANDIDATES);
+  var userIdColIdx = findColumnIndex_(userHeaders, USERID_HEADER_CANDIDATES);
+  if (emailColIdx === -1 || userIdColIdx === -1) return { success: false, error: 'UserData の列が見つかりません。' };
+
+  var userId = null;
+  for (var i = 1; i < userValues.length; i++) {
+    if (String(userValues[i][emailColIdx] || '').trim().toLowerCase() === email) {
+      userId = userValues[i][userIdColIdx];
+      break;
+    }
   }
-  return value;
+  if (userId === null || String(userId).trim() === '') return { success: false, error: '未登録ユーザーです。' };
+
+  // 過去2ヶ月の YYMM リストを生成
+  var months = getRecentMonths_();
+  var history = [];
+
+  months.forEach(function(yymm) {
+    var sheet = spreadsheet.getSheetByName('PurchaseHistory' + yymm);
+    if (!sheet) return;
+    var values = sheet.getDataRange().getValues();
+    if (values.length < 2) return;
+
+    var headers = values[0];
+    var dtIdx   = findColumnIndex_(headers, ['datetime', 'date', '日時']);
+    var uidIdx  = findColumnIndex_(headers, ['userid', 'user_id', 'uid']);
+    var nameIdx = findColumnIndex_(headers, ['itemname', 'item_name', 'name', '商品名']);
+    var amtIdx  = findColumnIndex_(headers, ['amountspent', 'amount', '金額', '支払額']);
+    var numIdx  = findColumnIndex_(headers, ['number', 'qty', 'quantity', '個数']);
+    if (dtIdx === -1 || uidIdx === -1 || nameIdx === -1 || amtIdx === -1) return;
+
+    for (var r = 1; r < values.length; r++) {
+      var row = values[r];
+      if (String(row[uidIdx]) !== String(userId)) continue;
+      var dt = row[dtIdx];
+      history.push({
+        dateTime:    dt instanceof Date ? dt.toISOString() : String(dt),
+        itemName:    String(row[nameIdx]),
+        amountSpent: Number(row[amtIdx]),
+        number:      numIdx !== -1 ? String(row[numIdx]) : '1'
+      });
+    }
+  });
+
+  // 新しい順にソート
+  history.sort(function(a, b) { return new Date(b.dateTime) - new Date(a.dateTime); });
+  return { success: true, history: history };
 }
 
 /**
- * ヘッダー行(1次元配列)の中から候補名(候補は複数、大文字小文字・前後空白は無視)に
- * 一致する列のインデックスを返す。見つからなければ-1。
- * 列番号を決め打ちにせず、シートの列構成が変わっても追従できるようにするための実装。
+ * 今月と先月の YYMM 文字列を返す（例: ['2609', '2608']）。
+ * 月をまたいでシートが追加されても自動対応。
  */
+function getRecentMonths_() {
+  var now = new Date();
+  var months = [];
+  for (var i = 0; i < 2; i++) {
+    var d  = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    var yy = String(d.getFullYear()).slice(2);
+    var mm = ('0' + (d.getMonth() + 1)).slice(-2);
+    months.push(yy + mm);
+  }
+  return months;
+}
+
 function findColumnIndex_(headers, candidates) {
   for (var i = 0; i < headers.length; i++) {
     var header = String(headers[i]).trim().toLowerCase();
     for (var j = 0; j < candidates.length; j++) {
-      if (header === candidates[j].toLowerCase()) {
-        return i;
-      }
+      if (header === candidates[j].toLowerCase()) return i;
     }
   }
   return -1;
 }
 
-/**
- * JSON形式のレスポンスを生成する。
- */
 function jsonResponse_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
