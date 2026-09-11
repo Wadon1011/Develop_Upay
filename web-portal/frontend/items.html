@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>UPay Shop</title>
+<title>UPortal - 商品一覧</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600&display=swap">
@@ -128,6 +128,24 @@
     font-size: 12px;
     color: var(--text-sub);
     font-weight: 500;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .feature-badge {
+    font-family: 'Outfit', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .3px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--accent-pale);
+    color: var(--accent-deep);
+    white-space: nowrap;
   }
 
   /* ── Main ────────────────────────────────────────────────── */
@@ -443,10 +461,13 @@
 
 <header class="header">
   <div class="header-inner">
-    <a class="logo" href="index.html">
-      <div class="logo-mark">U</div>
-      <div class="logo-text">U<span>Pay</span></div>
-    </a>
+    <div class="header-left">
+      <a class="logo" href="index.html">
+        <div class="logo-mark">U</div>
+        <div class="logo-text">U<span>Portal</span></div>
+      </a>
+      <span class="feature-badge">UPay</span>
+    </div>
     <span class="header-sub">商品一覧</span>
   </div>
 </header>
@@ -529,6 +550,22 @@
   const CAT_LABEL = { drink: 'ドリンク', snack: 'スナック', food: 'フード', other: 'その他' };
   const CAT_CLASS = { drink: 'cat-drink', snack: 'cat-snack', food: 'cat-food', other: 'cat-other' };
   const CAT_EMOJI = { drink: '🥤', snack: '🍫', food: '🍜', other: '📦' };
+  const CATEGORY_ORDER = ['drink', 'snack', 'food', 'other'];
+
+  // 在庫あり優先 → カテゴリ順 → 価格の安い順
+  function compareItemsForDisplay(a, b) {
+    const aInStock = Number(a.stock) > 0 ? 0 : 1;
+    const bInStock = Number(b.stock) > 0 ? 0 : 1;
+    if (aInStock !== bInStock) return aInStock - bInStock;
+
+    const aCatIdx = CATEGORY_ORDER.indexOf((a.category || 'other').toLowerCase());
+    const bCatIdx = CATEGORY_ORDER.indexOf((b.category || 'other').toLowerCase());
+    const aCat = aCatIdx === -1 ? CATEGORY_ORDER.length : aCatIdx;
+    const bCat = bCatIdx === -1 ? CATEGORY_ORDER.length : bCatIdx;
+    if (aCat !== bCat) return aCat - bCat;
+
+    return Number(a.price) - Number(b.price);
+  }
 
   // ── 状態 ────────────────────────────────────────────────────
   let allItems = [];
@@ -647,6 +684,7 @@
 
     try {
       allItems = await fetchItems();
+      allItems.sort(compareItemsForDisplay);
       loadingState.style.display = 'none';
       renderGrid();
     } catch (err) {
