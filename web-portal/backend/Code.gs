@@ -4,8 +4,9 @@
 
 var CLIENT_ID      = '605638314023-5rb9s3ukrkal634henma3trbnp17pfvq.apps.googleusercontent.com';
 var SPREADSHEET_ID = '1Nvv6gepROM11XAPHPaeU2aRrXSkRyBcGUo4qg5JOkyo';
-var SHEET_NAME      = 'UserData';
-var ITEM_SHEET_NAME = 'ItemData';
+var SHEET_NAME       = 'UserData';
+var ITEM_SHEET_NAME  = 'ItemData';
+var TOPUP_SHEET_NAME = 'TopupHistory';
 
 var EMAIL_HEADER_CANDIDATES   = ['email', 'emailaddress', 'mail', 'メールアドレス', 'メール', 'mailaddress'];
 var BALANCE_HEADER_CANDIDATES = ['balance', 'balanceamount', '残高', '残高額'];
@@ -54,7 +55,7 @@ function doGet(e) {
 /**
  * POST: idToken を検証し action に応じた処理を行う。
  *   action 省略 or 'balance' → 残高・UserID を返す
- *   action = 'history'       → 過去2ヶ月の購入履歴を返す
+ *   action = 'history'       → 過去2ヶ月の取引履歴（購入＋チャージ）を返す
  */
 function doPost(e) {
   try {
@@ -72,7 +73,7 @@ function doPost(e) {
     var email = String(tokenInfo.email || '').trim().toLowerCase();
     if (!email) return jsonResponse_({ success: false, error: 'トークンにメールアドレスが含まれていません。' });
 
-    if (action === 'history') return jsonResponse_(getPurchaseHistory_(email));
+    if (action === 'history') return jsonResponse_(getTransactionHistory_(email));
     return jsonResponse_(lookupBalanceByEmail_(email));
   } catch (err) {
     return jsonResponse_({ success: false, error: 'サーバー内部エラー: ' + err.message });
@@ -126,15 +127,15 @@ function lookupBalanceByEmail_(email) {
 }
 
 /**
- * 過去2ヶ月の PurchaseHistoryYYMM シートからユーザーの購入履歴を返す。
- * 新しい月のシートが追加されても YYMM 命名規則に従えば自動対応。
+ * 購入履歴（PurchaseHistoryYYMM）とチャージ履歴（TopupHistory）を
+ * 過去2ヶ月分マージして返す。type='purchase' / 'topup' で区別。
  */
-function getPurchaseHistory_(email) {
+function getTransactionHistory_(email) {
   var spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
-  var userSheet = spreadsheet.getSheetByName(SHEET_NAME);
-  if (!userSheet) return { success: false, error: 'UserDataシートが見つかりません。' };
 
   // email → UserID 変換
+  var userSheet = spreadsheet.getSheetByName(SHEET_NAME);
+  if (!userSheet) return { success: false, error: 'UserDataシートが見つかりません。' };
   var userValues = userSheet.getDataRange().getValues();
   var userHeaders = userValues[0];
   var emailColIdx  = findColumnIndex_(userHeaders, EMAIL_HEADER_CANDIDATES);
@@ -150,16 +151,15 @@ function getPurchaseHistory_(email) {
   }
   if (userId === null || String(userId).trim() === '') return { success: false, error: '未登録ユーザーです。' };
 
-  // 過去2ヶ月の YYMM リストを生成
-  var months = getRecentMonths_();
   var history = [];
 
+  // ── 購入履歴 (PurchaseHistoryYYMM) ──────────────────────────
+  var months = getRecentMonths_();
   months.forEach(function(yymm) {
     var sheet = spreadsheet.getSheetByName('PurchaseHistory' + yymm);
     if (!sheet) return;
     var values = sheet.getDataRange().getValues();
     if (values.length < 2) return;
-
     var headers = values[0];
     var dtIdx   = findColumnIndex_(headers, ['datetime', 'date', '日時']);
     var uidIdx  = findColumnIndex_(headers, ['userid', 'user_id', 'uid']);
@@ -167,19 +167,51 @@ function getPurchaseHistory_(email) {
     var amtIdx  = findColumnIndex_(headers, ['amountspent', 'amount', '金額', '支払額']);
     var numIdx  = findColumnIndex_(headers, ['number', 'qty', 'quantity', '個数']);
     if (dtIdx === -1 || uidIdx === -1 || nameIdx === -1 || amtIdx === -1) return;
-
     for (var r = 1; r < values.length; r++) {
       var row = values[r];
       if (String(row[uidIdx]) !== String(userId)) continue;
       var dt = row[dtIdx];
       history.push({
+        type:        'purchase',
         dateTime:    dt instanceof Date ? dt.toISOString() : String(dt),
-        itemName:    String(row[nameIdx]),
-        amountSpent: Number(row[amtIdx]),
+        label:       String(row[nameIdx]),
+        amount:      Number(row[amtIdx]),
         number:      numIdx !== -1 ? String(row[numIdx]) : '1'
       });
     }
   });
+
+  // ── チャージ履歴 (TopupHistory・単一シート・過去2ヶ月でフィルタ) ──
+  var topupSheet = spreadsheet.getSheetByName(TOPUP_SHEET_NAME);
+  if (topupSheet) {
+    var cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - 1);
+    cutoff.setDate(1);
+    cutoff.setHours(0, 0, 0, 0);
+
+    var tValues = topupSheet.getDataRange().getValues();
+    if (tValues.length >= 2) {
+      var tHeaders = tValues[0];
+      var tDtIdx  = findColumnIndex_(tHeaders, ['datetime', 'date', '日時']);
+      var tUidIdx = findColumnIndex_(tHeaders, ['userid', 'user_id', 'uid']);
+      var tAmtIdx = findColumnIndex_(tHeaders, ['amount', '金額', 'topupamount', 'チャージ額']);
+      if (tDtIdx !== -1 && tUidIdx !== -1 && tAmtIdx !== -1) {
+        for (var r = 1; r < tValues.length; r++) {
+          var row = tValues[r];
+          if (String(row[tUidIdx]) !== String(userId)) continue;
+          var dt = row[tDtIdx];
+          var dtDate = dt instanceof Date ? dt : new Date(dt);
+          if (dtDate < cutoff) continue;
+          history.push({
+            type:     'topup',
+            dateTime: dt instanceof Date ? dt.toISOString() : String(dt),
+            label:    'チャージ',
+            amount:   Number(row[tAmtIdx])
+          });
+        }
+      }
+    }
+  }
 
   // 新しい順にソート
   history.sort(function(a, b) { return new Date(b.dateTime) - new Date(a.dateTime); });
@@ -188,7 +220,6 @@ function getPurchaseHistory_(email) {
 
 /**
  * 今月と先月の YYMM 文字列を返す（例: ['2609', '2608']）。
- * 月をまたいでシートが追加されても自動対応。
  */
 function getRecentMonths_() {
   var now = new Date();

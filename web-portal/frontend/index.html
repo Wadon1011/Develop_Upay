@@ -609,6 +609,7 @@ body {
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
+.history-amount.topup { color: var(--accent); }
 .more-btn {
   width: 100%;
   margin-top: 10px;
@@ -828,7 +829,7 @@ body {
       <!-- 購入履歴 -->
       <div class="history-section" id="historySection" style="display:none">
         <div class="history-header">
-          <h3 class="history-title">購入履歴</h3>
+          <h3 class="history-title">取引履歴</h3>
           <span class="history-period" id="historyPeriod"></span>
         </div>
         <!-- スケルトン -->
@@ -838,7 +839,7 @@ body {
           <div class="history-skel-row"><div class="history-skel-dot"></div><div class="history-skel-line" style="width:60px"></div><div class="history-skel-line" style="width:90px;margin-left:8px;flex:1"></div><div class="history-skel-line" style="width:36px;margin-left:8px"></div></div>
         </div>
         <div class="history-list" id="historyList" hidden></div>
-        <div class="history-empty" id="historyEmpty" hidden>購入履歴がありません</div>
+        <div class="history-empty" id="historyEmpty" hidden>取引履歴がありません</div>
         <button class="more-btn" id="moreBtn" onclick="showAllHistory()" hidden>もっと見る（過去2ヶ月）</button>
       </div>
 
@@ -1148,14 +1149,20 @@ function buildHistoryRow(h) {
   const pad = n => String(n).padStart(2, '0');
   const dateStr = `${dt.getMonth()+1}/${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
 
+  const isTopup = h.type === 'topup';
+  const amountText = isTopup
+    ? `+¥${Number(h.amount).toLocaleString()}`
+    : `-¥${Number(h.amount).toLocaleString()}`;
+  const amountClass = isTopup ? 'history-amount topup' : 'history-amount';
+
   const row = document.createElement('div');
   row.className = 'history-row';
   row.innerHTML = `
     <div class="history-dot"></div>
     <div class="history-date">${dateStr}</div>
     <div class="history-main">
-      <div class="history-name">${escHtml(h.itemName)}</div>
-      <div class="history-amount">-¥${Number(h.amountSpent).toLocaleString()}</div>
+      <div class="history-name">${escHtml(h.label)}</div>
+      <div class="${amountClass}">${amountText}</div>
     </div>`;
   return row;
 }
